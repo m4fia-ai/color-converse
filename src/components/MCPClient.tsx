@@ -234,35 +234,11 @@ export const MCPClient = () => {
       // Use generated session ID if no header session ID provided
       const finalSessionId = headerSessionId || sessionId;
       
-      // Step 2: Send initialized notification (if required)
-      addLog('info', 'Step 2: Sending initialized notification...');
-      const notifyResponse = await fetch(
-        "https://final-meta-mcp-server-production.up.railway.app/mcp",
-        {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            "User-Agent": "climaty-mcp-client/1.0.0",
-            "mcp-session-id": finalSessionId,
-          },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            method: "notifications/initialized",
-            params: {}
-          }),
-          mode: "cors",
-        }
-      );
-
-      addLog('info', `Initialized notification status: ${notifyResponse.status}`);
-      if (notifyResponse.status === 400) {
-        const notifyError = await notifyResponse.text();
-        addLog('error', `Notification error: ${notifyError}`);
-      }
-
-      // Step 3: Get available tools
-      addLog('info', 'Step 3: Fetching available tools...');
+      // Step 2: Skip initialized notification for now (server might not require it)
+      addLog('info', 'Step 2: Skipping initialized notification (server might not require it)...');
+      
+      // Step 3: Get available tools (try without session management)
+      addLog('info', 'Step 3: Fetching available tools (no session)...');
       const toolsResponse = await fetch(
         "https://final-meta-mcp-server-production.up.railway.app/mcp",
         {
@@ -271,7 +247,7 @@ export const MCPClient = () => {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
-            "mcp-session-id": finalSessionId,
+            // Try without any session headers first
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
