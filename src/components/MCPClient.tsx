@@ -69,6 +69,7 @@ export const MCPClient = () => {
   const [selectedModel, setSelectedModel] = useState('');
   const [activeToolCall, setActiveToolCall] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [serverUrl] = useState('https://final-meta-mcp-server-production.up.railway.app/mcp');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -109,317 +110,120 @@ export const MCPClient = () => {
     setIsConnected(false);
     setMcpTools([]);
     
-    addLog('info', 'Attempting to connect to MCP server...');
-    addLog('info', 'Server URL: /api/mcp (proxied)');
+    addLog('info', 'Starting MCP connection using mcp-remote bridge...');
+    addLog('info', `Target server: ${serverUrl}`);
 
     try {
-      // Will store the server-provided session ID
-      let serverSessionId = '';
-      
-      const MCP_URL = "/api/mcp";
-      
-      // Helper function to make JSON-RPC calls with proper session ID
-      const rpc = async (method: string, params?: any) => {
-        const requestBody: any = {
-          jsonrpc: '2.0',
-          id: Date.now(),
-          method
-        };
-        
-        // Only include params if they are provided and not empty
-        if (params !== undefined && params !== null) {
-          requestBody.params = params;
-        }
-        
-        addLog('info', `Sending RPC request: ${method} with body: ${JSON.stringify(requestBody)}`);
-        
-        return fetch(MCP_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json, text/event-stream',
-            'mcp-session-id': serverSessionId,
-            'User-Agent': 'climaty-mcp-client/1.0.0'
-          },
-          body: JSON.stringify(requestBody),
-          mode: 'cors'
-        });
+      // Start the MCP remote proxy
+      const proxyConfig = {
+        remoteUrl: serverUrl,
+        transport: 'http-only' as const
       };
       
-      // Step 1: Initialize the MCP session using proper HTTP transport
-      addLog('info', 'Step 1: Initializing MCP session...');
-      
-      const initRequest = {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: "2025-06-18",
-          capabilities: {
-            roots: { listChanged: true },
-            sampling: {}
-          },
-          clientInfo: {
-            name: "climaty",
-            version: "1.0.0"
-          }
-        }
-      };
-
-      addLog('info', `Sending initialize request: ${JSON.stringify(initRequest)}`);
-
-      const initResponse = await fetch(MCP_URL, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Accept": "application/json, text/event-stream",
-          "User-Agent": "climaty-mcp-client/1.0.0",
-          // Don't send session ID in initialization - this should establish the session
-        },
-        body: JSON.stringify(initRequest),
-        mode: "cors",
+      addLog('info', 'Starting mcp-remote proxy...');
+      const startResponse = await fetch('/api/mcp-proxy/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(proxyConfig)
       });
-
-      addLog('info', `Initialize Response Status: ${initResponse.status} ${initResponse.statusText}`);
-      addLog('info', `Content-Type: ${initResponse.headers.get('content-type')}`);
-      addLog('info', `Response Headers: ${JSON.stringify(Object.fromEntries(initResponse.headers.entries()))}`);
-
-      if (!initResponse.ok) {
-        const errorText = await initResponse.text();
-        addLog('error', `Initialize failed: ${errorText}`);
-        throw new Error(`HTTP ${initResponse.status}: ${initResponse.statusText}`);
-      }
-
-      // Handle successful response (SSE or JSON)
-      let initData;
-      const contentType = initResponse.headers.get('content-type') || '';
       
-      if (contentType.includes('text/event-stream')) {
-        // Handle SSE response and wait for server session ID
-        addLog('info', 'Handling SSE response...');
-        const reader = initResponse.body?.getReader();
-        const decoder = new TextDecoder();
-        let sseData = '';
-        let foundSession = false;
-        
-        if (reader) {
-          // Set a timeout to continue reading for session ID after getting init data
-          const timeoutMs = 2000; // Wait up to 2 seconds for session ID
-          const startTime = Date.now();
-          
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              addLog('info', 'SSE stream ended');
-              break;
-            }
-            
-            const chunk = decoder.decode(value, { stream: true });
-            sseData += chunk;
-            addLog('info', `SSE chunk received: ${chunk}`);
-            
-            // Parse each complete SSE event
-            const lines = sseData.split('\n');
-            let eventName = 'message';
-            
-            for (const line of lines) {
-              if (line.startsWith('event: ')) {
-                eventName = line.substring(7).trim();
-                addLog('info', `Processing SSE event: ${eventName}`);
-              }
-              if (line.startsWith('data: ')) {
-                const jsonStr = line.substring(6).trim();
-                if (jsonStr) {
-                  addLog('info', `Found SSE event: ${eventName}, data: ${jsonStr}`);
-                  
-                  try {
-                    const payload = JSON.parse(jsonStr);
-                    
-                    // Initialize data on the first message (old behaviour)
-                    if (!initData && eventName === 'message' && payload.jsonrpc === '2.0') {
-                      initData = payload;
-                      addLog('info', `Captured init data from message event`);
-                    }
-                    
-                    // Capture session id if the server sends one
-                    if (
-                      (eventName === 'session' && payload.sessionId) ||
-                      (payload.result && payload.result.sessionId) ||
-                      (payload.sessionId)
-                    ) {
-                      serverSessionId = payload.sessionId || payload.result.sessionId;
-                      addLog('info', `Server session id: ${serverSessionId}`);
-                      foundSession = true;
-                      break;
-                    }
-                  } catch (e) {
-                    addLog('warning', `Failed to parse SSE data: ${jsonStr} - Error: ${e}`);
-                  }
-                }
-              }
-            }
-            
-            // If we found the session ID, break immediately
-            if (foundSession) {
-              addLog('info', 'Found session ID, stopping SSE reading');
-              break;
-            }
-            
-            // If we have init data but no session ID yet, continue reading for a limited time
-            if (initData && !foundSession) {
-              const elapsed = Date.now() - startTime;
-              if (elapsed > timeoutMs) {
-                addLog('warning', `Timeout waiting for session ID after ${elapsed}ms, proceeding without it`);
-                break;
-              }
-              addLog('info', `Waiting for session ID... (${elapsed}ms elapsed)`);
+      if (!startResponse.ok) {
+        const error = await startResponse.text();
+        throw new Error(`Failed to start mcp-remote proxy: ${error}`);
+      }
+      
+      addLog('info', 'mcp-remote proxy started successfully');
+      
+      // Step 1: Initialize connection through proxy
+      addLog('info', 'Step 1: Initializing connection...');
+      const initResponse = await fetch('/api/mcp-proxy/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-06-18',
+            capabilities: {
+              roots: { listChanged: true },
+              sampling: {}
+            },
+            clientInfo: {
+              name: 'climaty',
+              version: '1.0.0'
             }
           }
-        }
-        
-        if (!initData) {
-          addLog('error', `Failed to parse SSE response. Full SSE data: ${sseData}`);
-          throw new Error('Failed to parse SSE response - no valid initialization data found');
-        }
-      } else {
-        // Handle JSON response
-        addLog('info', 'Handling JSON response...');
-        initData = await initResponse.json();
+        })
+      });
+      
+      if (!initResponse.ok) {
+        throw new Error(`Initialize failed: ${initResponse.status} ${initResponse.statusText}`);
       }
-
-      if (!initData) {
-        addLog('error', 'No initialization data received');
-        throw new Error('No initialization data received from server');
-      }
-
+      
+      const initData = await initResponse.json();
       addLog('info', `Initialize response: ${JSON.stringify(initData)}`);
-
+      
       if (initData.error) {
-        addLog('error', `Initialize Error: ${initData.error.message || JSON.stringify(initData.error)}`);
-        throw new Error(initData.error.message || 'Initialize failed');
-      }
-
-      // Check if session ID was provided in response headers
-      const headerSessionId = initResponse.headers.get('x-mcp-session-id') || 
-                             initResponse.headers.get('mcp-session-id') ||
-                             initResponse.headers.get('session-id');
-      addLog('info', `Header Session ID: ${headerSessionId || 'None provided'}`);
-      
-      // Use header session ID if available, otherwise use the one from SSE
-      if (headerSessionId) {
-        serverSessionId = headerSessionId;
-        addLog('info', `Using header session ID: ${serverSessionId}`);
+        throw new Error(`Initialize error: ${initData.error.message || initData.error.code}`);
       }
       
-      // If we still don't have a session ID, let's try to proceed anyway to see what happens
-      if (!serverSessionId) {
-        addLog('warning', 'No session ID received from server - trying to proceed without one');
-        // For now, continue but note that tools requests might fail
-      }
-      
-      // Step 2: Send initialized notification (required by Meta MCP server)
+      // Step 2: Send initialized notification
       addLog('info', 'Step 2: Sending initialized notification...');
       try {
-        const initializedResponse = await rpc('initialized');
-        addLog('info', `Initialized notification sent successfully: ${initializedResponse.status}`);
-      } catch (initError) {
-        addLog('warning', `Initialized notification failed: ${initError} - continuing anyway`);
+        const notifyResponse = await fetch('/api/mcp-proxy/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            method: 'initialized',
+            params: {}
+          })
+        });
+        
+        if (notifyResponse.ok) {
+          addLog('info', 'Initialized notification sent successfully');
+        } else {
+          addLog('warning', 'Initialized notification failed - continuing anyway');
+        }
+      } catch (notifyError) {
+        addLog('warning', `Initialized notification error: ${notifyError} - continuing anyway`);
       }
       
-      // Step 3: Get available tools using the server session ID  
-      addLog('info', `Step 3: Fetching available tools using session ID: ${serverSessionId}`);
+      // Step 3: Get available tools
+      addLog('info', 'Step 3: Fetching available tools...');
+      const toolsResponse = await fetch('/api/mcp-proxy/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          method: 'tools/list',
+          params: {}
+        })
+      });
       
-      // According to MCP spec, tools/list requires an empty params object
-      const toolsResponse = await rpc('tools/list', {});
-
-      addLog('info', `Tools Response Status: ${toolsResponse.status} ${toolsResponse.statusText}`);
-
       if (!toolsResponse.ok) {
-        const errorText = await toolsResponse.text();
-        addLog('error', `Tools request failed: ${errorText}`);
-        throw new Error(`HTTP ${toolsResponse.status}: ${toolsResponse.statusText}`);
+        throw new Error(`Tools request failed: ${toolsResponse.status} ${toolsResponse.statusText}`);
       }
-
-      // Handle tools response (SSE or JSON)
-      const toolsContentType = toolsResponse.headers.get('content-type') || '';
-      let toolsData;
       
-      if (toolsContentType.includes('text/event-stream')) {
-        // Handle SSE response for tools
-        addLog('info', 'Handling tools SSE response...');
-        const reader = toolsResponse.body?.getReader();
-        const decoder = new TextDecoder();
-        let sseData = '';
-        
-        if (reader) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value, { stream: true });
-            sseData += chunk;
-            addLog('info', `Tools SSE chunk received: ${chunk}`);
-            
-            // Look for data lines in SSE format
-            const lines = sseData.split('\n');
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const jsonStr = line.substring(6);
-                addLog('info', `Found tools SSE data line: ${jsonStr}`);
-                try {
-                  toolsData = JSON.parse(jsonStr);
-                  addLog('info', `Parsed tools SSE data: ${JSON.stringify(toolsData)}`);
-                  break;
-                } catch (e) {
-                  addLog('warning', `Failed to parse tools SSE data: ${jsonStr} - Error: ${e}`);
-                }
-              }
-            }
-            if (toolsData) break;
-          }
-        }
-        
-        if (!toolsData) {
-          addLog('error', `Failed to parse tools SSE response. Full SSE data: ${sseData}`);
-          throw new Error('Failed to parse tools SSE response - no valid data found');
-        }
-      } else {
-        // Handle JSON response for tools
-        addLog('info', 'Handling tools JSON response...');
-        toolsData = await toolsResponse.json();
-      }
-
+      const toolsData = await toolsResponse.json();
       addLog('info', `Tools response: ${JSON.stringify(toolsData)}`);
-
+      
       if (toolsData.error) {
-        addLog('error', `Tools Error: ${toolsData.error.message || JSON.stringify(toolsData.error)}`);
-        throw new Error(toolsData.error.message || 'Tools request failed');
+        throw new Error(`Tools error: ${toolsData.error.message || toolsData.error.code}`);
       }
 
-      if (toolsData.result && toolsData.result.tools) {
-        const tools: MCPTool[] = toolsData.result.tools.map((tool: any) => ({
-          name: tool.name,
-          description: tool.description || 'No description available',
-          inputSchema: tool.inputSchema
-        }));
-
-        setMcpTools(tools);
-        setIsConnected(true);
-        addLog('info', `Successfully connected! Found ${tools.length} tools:`);
-
-        tools.forEach(tool => {
-          addLog('info', `  - ${tool.name}: ${tool.description}`);
-        });
-
-        toast({
-          title: 'MCP Server Connected',
-          description: `Connected successfully. ${tools.length} tools available.`,
-        });
+      if (toolsData.result?.tools) {
+        setMcpTools(toolsData.result.tools);
+        addLog('info', `Successfully loaded ${toolsData.result.tools.length} tools`);
       } else {
-        addLog('warning', 'Server responded but no tools found in response');
-        addLog('info', `Response structure: ${JSON.stringify(toolsData, null, 2)}`);
-        setIsConnected(true); // Still mark as connected even if no tools
+        addLog('warning', 'No tools found in response');
+        setMcpTools([]);
       }
+      
+      setIsConnected(true);
+      addLog('info', 'Connection successful via mcp-remote bridge!');
+      
+      toast({
+        title: 'MCP Server Connected',
+        description: `Connected successfully via mcp-remote bridge.`,
+      });
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
