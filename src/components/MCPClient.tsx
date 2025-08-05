@@ -147,8 +147,7 @@ export const MCPClient = () => {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
-            // Add session tracking headers
-            "mcp-session-id": sessionId,
+            // Don't send session ID in initialization - this should establish the session
           },
           body: JSON.stringify(initRequest),
           mode: "cors",
