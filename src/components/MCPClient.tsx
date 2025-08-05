@@ -148,7 +148,7 @@ export const MCPClient = () => {
             "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
             // Add session tracking headers
-            "x-mcp-client-session": sessionId,
+            "mcp-session-id": sessionId,
           },
           body: JSON.stringify(initRequest),
           mode: "cors",
@@ -245,7 +245,7 @@ export const MCPClient = () => {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
-            "x-mcp-client-session": finalSessionId,
+            "mcp-session-id": finalSessionId,
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
@@ -272,7 +272,7 @@ export const MCPClient = () => {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
-            "x-mcp-client-session": finalSessionId,
+            "mcp-session-id": finalSessionId,
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
