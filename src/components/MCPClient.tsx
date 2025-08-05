@@ -147,10 +147,11 @@ export const MCPClient = () => {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
-            // Don't send session ID in initialization - this should establish the session
+            "mcp-session-id": sessionId, // Try adding session to init
           },
           body: JSON.stringify(initRequest),
           mode: "cors",
+          credentials: "include", // Include cookies for session persistence
         }
       );
 
@@ -261,9 +262,13 @@ export const MCPClient = () => {
         "https://final-meta-mcp-server-production.up.railway.app/mcp",
         {
           method: "POST",
-          headers: toolsHeaders,
+          headers: {
+            ...toolsHeaders,
+            "mcp-session-id": sessionId, // Add session back to headers
+          },
           body: JSON.stringify(toolsRequestBody),
           mode: "cors",
+          credentials: "include", // Include cookies for session persistence
         }
       );
 
