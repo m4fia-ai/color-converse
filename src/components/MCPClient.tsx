@@ -132,6 +132,7 @@ export const MCPClient = () => {
       );
 
       addLog('info', `Initialize Response Status: ${initResponse.status} ${initResponse.statusText}`);
+      addLog('info', `Content-Type: ${initResponse.headers.get('content-type')}`);
 
       if (!initResponse.ok) {
         const errorText = await initResponse.text();
@@ -139,7 +140,46 @@ export const MCPClient = () => {
         throw new Error(`HTTP ${initResponse.status}: ${initResponse.statusText}`);
       }
 
-      const initData = await initResponse.json();
+      let initData;
+      const contentType = initResponse.headers.get('content-type') || '';
+      
+      if (contentType.includes('text/event-stream')) {
+        // Handle SSE response
+        addLog('info', 'Handling SSE response...');
+        const reader = initResponse.body?.getReader();
+        const decoder = new TextDecoder();
+        let sseData = '';
+        
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            sseData += chunk;
+            
+            // Look for data lines in SSE format
+            const lines = sseData.split('\n');
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const jsonStr = line.substring(6);
+                try {
+                  initData = JSON.parse(jsonStr);
+                  addLog('info', `Parsed SSE data: ${JSON.stringify(initData)}`);
+                  break;
+                } catch (e) {
+                  addLog('warning', `Failed to parse SSE data: ${jsonStr}`);
+                }
+              }
+            }
+            if (initData) break;
+          }
+        }
+      } else {
+        // Handle JSON response
+        addLog('info', 'Handling JSON response...');
+        initData = await initResponse.json();
+      }
       if (initData.error) {
         addLog('error', `Initialize Error: ${initData.error.message || JSON.stringify(initData.error)}`);
         throw new Error(initData.error.message || 'Initialize failed');
@@ -195,6 +235,7 @@ export const MCPClient = () => {
       );
 
       addLog('info', `Tools Response Status: ${toolsResponse.status} ${toolsResponse.statusText}`);
+      addLog('info', `Tools Content-Type: ${toolsResponse.headers.get('content-type')}`);
 
       if (!toolsResponse.ok) {
         const errorText = await toolsResponse.text();
@@ -202,7 +243,46 @@ export const MCPClient = () => {
         throw new Error(`HTTP ${toolsResponse.status}: ${toolsResponse.statusText}`);
       }
 
-      const toolsData = await toolsResponse.json();
+      let toolsData;
+      const toolsContentType = toolsResponse.headers.get('content-type') || '';
+      
+      if (toolsContentType.includes('text/event-stream')) {
+        // Handle SSE response for tools
+        addLog('info', 'Handling tools SSE response...');
+        const reader = toolsResponse.body?.getReader();
+        const decoder = new TextDecoder();
+        let sseData = '';
+        
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            sseData += chunk;
+            
+            // Look for data lines in SSE format
+            const lines = sseData.split('\n');
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const jsonStr = line.substring(6);
+                try {
+                  toolsData = JSON.parse(jsonStr);
+                  addLog('info', `Parsed tools SSE data: ${JSON.stringify(toolsData)}`);
+                  break;
+                } catch (e) {
+                  addLog('warning', `Failed to parse tools SSE data: ${jsonStr}`);
+                }
+              }
+            }
+            if (toolsData) break;
+          }
+        }
+      } else {
+        // Handle JSON response for tools
+        addLog('info', 'Handling tools JSON response...');
+        toolsData = await toolsResponse.json();
+      }
       if (toolsData.error) {
         addLog('error', `Tools Error: ${toolsData.error.message || JSON.stringify(toolsData.error)}`);
         throw new Error(toolsData.error.message || 'Tools request failed');
