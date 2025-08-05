@@ -131,6 +131,8 @@ export const MCPClient = () => {
           requestBody.params = params;
         }
         
+        addLog('info', `Sending RPC request: ${method} with body: ${JSON.stringify(requestBody)}`);
+        
         return fetch(MCP_URL, {
           method: 'POST',
           headers: {
@@ -324,10 +326,11 @@ export const MCPClient = () => {
         addLog('warning', `Initialized notification failed: ${initError} - continuing anyway`);
       }
       
-      // Step 3: Get available tools using the server session ID
+      // Step 3: Get available tools using the server session ID  
       addLog('info', `Step 3: Fetching available tools using session ID: ${serverSessionId}`);
       
-      const toolsResponse = await rpc('tools/list');
+      // According to MCP spec, tools/list requires an empty params object
+      const toolsResponse = await rpc('tools/list', {});
 
       addLog('info', `Tools Response Status: ${toolsResponse.status} ${toolsResponse.statusText}`);
 
