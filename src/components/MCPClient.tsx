@@ -145,7 +145,7 @@ export const MCPClient = () => {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
-            "Accept": "application/json",
+            "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
             // Add session tracking headers
             "x-mcp-client-session": sessionId,
@@ -173,7 +173,7 @@ export const MCPClient = () => {
               method: "POST",
               headers: { 
                 "Content-Type": "application/json",
-                "Accept": "application/json",
+                "Accept": "application/json, text/event-stream",
                 "User-Agent": "climaty-mcp-client/1.0.0",
               },
               body: JSON.stringify(initRequest),
@@ -205,7 +205,7 @@ export const MCPClient = () => {
                 method: "POST",
                 headers: { 
                   "Content-Type": "application/json",
-                  "Accept": "application/json",
+                  "Accept": "application/json, text/event-stream",
                   "User-Agent": "climaty-mcp-client/1.0.0",
                 },
                 body: JSON.stringify({
@@ -290,7 +290,7 @@ export const MCPClient = () => {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
-            "Accept": "application/json",
+            "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
             "x-mcp-client-session": finalSessionId,
           },
@@ -317,7 +317,7 @@ export const MCPClient = () => {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
-            "Accept": "application/json",
+            "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
             "x-mcp-client-session": finalSessionId,
           },
