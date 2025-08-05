@@ -121,7 +121,7 @@ export const MCPClient = () => {
           method: "POST",
           headers: { 
             "Content-Type": "application/json" ,
-            "Accept": "application/json"
+            "Accept":   "text/event-stream" 
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
