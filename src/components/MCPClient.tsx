@@ -125,7 +125,7 @@ export const MCPClient = () => {
           body: JSON.stringify({
             jsonrpc: "2.0",
             id: 1,
-            method: "tools.list", // built-in RPC
+            method:  "tools/list", // built-in RPC
             params: {}
           }),
           mode: "cors",
