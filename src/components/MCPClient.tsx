@@ -210,11 +210,6 @@ export const MCPClient = () => {
           title: 'MCP Server Connected',
           description: `Connected successfully. ${tools.length} tools available.`,
         });
-      } else {
-        addLog('warning', 'Server responded but no tools found in response');
-        addLog('info', `Response structure: ${JSON.stringify(data, null, 2)}`);
-        setIsConnected(true); // Still mark as connected even if no tools
-      }
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
