@@ -119,7 +119,18 @@ export const MCPClient = () => {
       const MCP_URL = "/api/mcp";
       
       // Helper function to make JSON-RPC calls with proper session ID
-      const rpc = async (method: string, params = {}) => {
+      const rpc = async (method: string, params?: any) => {
+        const requestBody: any = {
+          jsonrpc: '2.0',
+          id: Date.now(),
+          method
+        };
+        
+        // Only include params if they are provided and not empty
+        if (params !== undefined && params !== null) {
+          requestBody.params = params;
+        }
+        
         return fetch(MCP_URL, {
           method: 'POST',
           headers: {
@@ -128,12 +139,7 @@ export const MCPClient = () => {
             'mcp-session-id': serverSessionId,
             'User-Agent': 'climaty-mcp-client/1.0.0'
           },
-          body: JSON.stringify({ 
-            jsonrpc: '2.0', 
-            id: Date.now(), 
-            method, 
-            params 
-          }),
+          body: JSON.stringify(requestBody),
           mode: 'cors'
         });
       };
@@ -312,7 +318,7 @@ export const MCPClient = () => {
       // Step 2: Send initialized notification (required by Meta MCP server)
       addLog('info', 'Step 2: Sending initialized notification...');
       try {
-        const initializedResponse = await rpc('initialized', {});
+        const initializedResponse = await rpc('initialized');
         addLog('info', `Initialized notification sent successfully: ${initializedResponse.status}`);
       } catch (initError) {
         addLog('warning', `Initialized notification failed: ${initError} - continuing anyway`);
@@ -321,7 +327,7 @@ export const MCPClient = () => {
       // Step 3: Get available tools using the server session ID
       addLog('info', `Step 3: Fetching available tools using session ID: ${serverSessionId}`);
       
-      const toolsResponse = await rpc('tools/list', {});
+      const toolsResponse = await rpc('tools/list');
 
       addLog('info', `Tools Response Status: ${toolsResponse.status} ${toolsResponse.statusText}`);
 
