@@ -101,72 +101,115 @@ export const MCPClient = () => {
     addLog('info', 'Server URL: https://final-meta-mcp-server-production.up.railway.app/mcp');
 
     try {
-      // Try to connect to the actual MCP server
-      // const response = await fetch('https://final-meta-mcp-server-production.up.railway.app/mcp', {
-      //   method: 'POST',
-      //   headers: {
-      //     'Content-Type': 'application/json',
-      //   },
-      //   body: JSON.stringify({
-      //     jsonrpc: '2.0',
-      //     id: 1,
-      //     method: 'tools/list',
-      //     params: {}
-      //   })
-      // });
-      // example with the JS fetch API
-      // Generate a session ID for this connection
-      const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      const response = await fetch(
+      // Step 1: Initialize the MCP session
+      addLog('info', 'Step 1: Initializing MCP session...');
+      const initResponse = await fetch(
         "https://final-meta-mcp-server-production.up.railway.app/mcp",
-       {
+        {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
-            "X-Session-ID": sessionId,
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
             id: 1,
-            method: "tools/list",
+            method: "initialize",
             params: {
-              sessionId: sessionId
+              protocolVersion: "2025-06-18",
+              capabilities: {
+                roots: { listChanged: true },
+                sampling: {}
+              },
+              clientInfo: {
+                name: "climaty",
+                version: "1.0.0"
+              }
             }
           }),
           mode: "cors",
-       }
+        }
       );
 
+      addLog('info', `Initialize Response Status: ${initResponse.status} ${initResponse.statusText}`);
 
-      addLog('info', `HTTP Response Status: ${response.status} ${response.statusText}`);
-
-      if (!response.ok) {
-        // Get the error response body for debugging
-        const errorText = await response.text();
-        addLog('error', `Server response: ${errorText}`);
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (!initResponse.ok) {
+        const errorText = await initResponse.text();
+        addLog('error', `Initialize failed: ${errorText}`);
+        throw new Error(`HTTP ${initResponse.status}: ${initResponse.statusText}`);
       }
 
-      // const responseText = await response.text();
-      // addLog('info', `Raw response: ${responseText}`);
-
-      // let data;
-      // try {
-      //   data = await response.json();
-      // } catch (parseError) {
-      //   addLog('error', `Failed to parse JSON response: ${parseError}`);
-      //   throw new Error('Invalid JSON response from server');
-      // }
-      const data = await response.json();
-      if (data.error) {
-        addLog('error', `MCP Error: ${data.error.message || JSON.stringify(data.error)}`);
-        throw new Error(data.error.message || 'MCP server returned an error');
+      const initData = await initResponse.json();
+      if (initData.error) {
+        addLog('error', `Initialize Error: ${initData.error.message || JSON.stringify(initData.error)}`);
+        throw new Error(initData.error.message || 'Initialize failed');
       }
 
-      if (data.result && data.result.tools) {
-        const tools: MCPTool[] = data.result.tools.map((tool: any) => ({
+      // Extract session ID from response headers
+      const sessionId = initResponse.headers.get('Mcp-Session-Id');
+      addLog('info', `Session ID: ${sessionId || 'None provided'}`);
+
+      // Step 2: Send initialized notification
+      if (sessionId) {
+        addLog('info', 'Step 2: Sending initialized notification...');
+        const notifyResponse = await fetch(
+          "https://final-meta-mcp-server-production.up.railway.app/mcp",
+          {
+            method: "POST",
+            headers: { 
+              "Content-Type": "application/json",
+              "Accept": "application/json, text/event-stream",
+              "Mcp-Session-Id": sessionId,
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              method: "notifications/initialized",
+              params: {}
+            }),
+            mode: "cors",
+          }
+        );
+
+        addLog('info', `Initialized notification status: ${notifyResponse.status}`);
+      }
+
+      // Step 3: Get available tools
+      addLog('info', 'Step 3: Fetching available tools...');
+      const toolsResponse = await fetch(
+        "https://final-meta-mcp-server-production.up.railway.app/mcp",
+        {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            ...(sessionId && { "Mcp-Session-Id": sessionId }),
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "tools/list",
+            params: {}
+          }),
+          mode: "cors",
+        }
+      );
+
+      addLog('info', `Tools Response Status: ${toolsResponse.status} ${toolsResponse.statusText}`);
+
+      if (!toolsResponse.ok) {
+        const errorText = await toolsResponse.text();
+        addLog('error', `Tools request failed: ${errorText}`);
+        throw new Error(`HTTP ${toolsResponse.status}: ${toolsResponse.statusText}`);
+      }
+
+      const toolsData = await toolsResponse.json();
+      if (toolsData.error) {
+        addLog('error', `Tools Error: ${toolsData.error.message || JSON.stringify(toolsData.error)}`);
+        throw new Error(toolsData.error.message || 'Tools request failed');
+      }
+
+      if (toolsData.result && toolsData.result.tools) {
+        const tools: MCPTool[] = toolsData.result.tools.map((tool: any) => ({
           name: tool.name,
           description: tool.description || 'No description available',
           inputSchema: tool.inputSchema
@@ -175,7 +218,6 @@ export const MCPClient = () => {
         setMcpTools(tools);
         setIsConnected(true);
         addLog('info', `Successfully connected! Found ${tools.length} tools:`);
-  
 
         tools.forEach(tool => {
           addLog('info', `  - ${tool.name}: ${tool.description}`);
@@ -185,13 +227,16 @@ export const MCPClient = () => {
           title: 'MCP Server Connected',
           description: `Connected successfully. ${tools.length} tools available.`,
         });
+      } else {
+        addLog('warning', 'Server responded but no tools found in response');
+        addLog('info', `Response structure: ${JSON.stringify(toolsData, null, 2)}`);
+        setIsConnected(true); // Still mark as connected even if no tools
       }
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       addLog('error', `Connection failed: ${errorMessage}`);
       
-      // Try to provide more specific error information
       if (error instanceof TypeError && error.message.includes('fetch')) {
         addLog('error', 'Network error - possibly CORS, server down, or connection timeout');
       }
