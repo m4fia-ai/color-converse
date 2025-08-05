@@ -244,14 +244,21 @@ export const MCPClient = () => {
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
         "User-Agent": "climaty-mcp-client/1.0.0",
-        // Try multiple session header formats
-        "mcp-session-id": sessionId,
-        "x-session-id": sessionId,
-        "session-id": sessionId,
-        "authorization": `Bearer ${sessionId}`,
+      };
+      
+      const toolsRequestBody = {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+        // Try including session in the body instead of headers
+        meta: {
+          sessionId: sessionId
+        }
       };
       
       addLog('info', `Tools request headers: ${JSON.stringify(toolsHeaders)}`);
+      addLog('info', `Tools request body: ${JSON.stringify(toolsRequestBody)}`);
       addLog('info', `Using session ID: ${sessionId}`);
       
       const toolsResponse = await fetch(
@@ -259,12 +266,7 @@ export const MCPClient = () => {
         {
           method: "POST",
           headers: toolsHeaders,
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 2,
-            method: "tools/list",
-            params: {}
-          }),
+          body: JSON.stringify(toolsRequestBody),
           mode: "cors",
         }
       );
