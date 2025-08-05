@@ -200,10 +200,10 @@ export const MCPClient = () => {
         addLog('warning', `Initialized notification failed: ${notifyError} - continuing anyway`);
       }
       
-      // Step 3: Get available tools - LibreChat pattern with no params for list operations
+      // Step 3: Get available tools - MCP 2025-06-18 spec compliant
       addLog('info', 'Step 3: Fetching available tools...');
       try {
-        const toolsData = await sendMCPRequest('tools/list');
+        const toolsData = await sendMCPRequest('tools/list', {});
         
         if (toolsData.result?.tools && Array.isArray(toolsData.result.tools)) {
           setMcpTools(toolsData.result.tools);
