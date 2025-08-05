@@ -115,13 +115,20 @@ export const MCPClient = () => {
       //   })
       // });
       // example with the JS fetch API
-      const response = await fetch("https://final-meta-mcp-server-production.up.railway.app/mcp", {
-        method: "GET",                  // SSE is always GET
-        headers: {
-          "Accept": "text/event-stream" // ← critical
-        },
-        mode: "cors",                   // your CORSMiddleware already allows it
-      });
+      const response = await fetch(
+        "https://final-meta-mcp-server-production.up.railway.app/mcp",
+       {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/list",   // built-in RPC
+            params: {}
+          }),
+          mode: "cors",
+       }
+      );
 
 
       addLog('info', `HTTP Response Status: ${response.status} ${response.statusText}`);
@@ -135,7 +142,7 @@ export const MCPClient = () => {
 
       let data;
       try {
-        data = JSON.parse(responseText);
+        data = await response.json();
       } catch (parseError) {
         addLog('error', `Failed to parse JSON response: ${parseError}`);
         throw new Error('Invalid JSON response from server');
