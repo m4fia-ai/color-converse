@@ -120,8 +120,7 @@ export const MCPClient = () => {
        {
           method: "POST",
           headers: { 
-            "Content-Type": "application/json" ,
-            "Accept": "application/json" 
+            "Content-Type": "application/json" 
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
@@ -143,14 +142,14 @@ export const MCPClient = () => {
       // const responseText = await response.text();
       // addLog('info', `Raw response: ${responseText}`);
 
-      let data;
-      try {
-        data = await response.json();
-      } catch (parseError) {
-        addLog('error', `Failed to parse JSON response: ${parseError}`);
-        throw new Error('Invalid JSON response from server');
-      }
-
+      // let data;
+      // try {
+      //   data = await response.json();
+      // } catch (parseError) {
+      //   addLog('error', `Failed to parse JSON response: ${parseError}`);
+      //   throw new Error('Invalid JSON response from server');
+      // }
+      const data = await response.json();
       if (data.error) {
         addLog('error', `MCP Error: ${data.error.message || JSON.stringify(data.error)}`);
         throw new Error(data.error.message || 'MCP server returned an error');
