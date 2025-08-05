@@ -74,6 +74,18 @@ export const MCPClient = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Load saved settings
+    const savedSettings = localStorage.getItem('climaty-settings');
+    if (savedSettings) {
+      const settings = JSON.parse(savedSettings);
+      setApiKey(settings.apiKey || '');
+      const provider = API_PROVIDERS.find(p => p.name === settings.provider) || API_PROVIDERS[0];
+      setSelectedProvider(provider);
+      setSelectedModel(settings.model || provider.models[0]);
+    } else {
+      setSelectedModel(selectedProvider.models[0]);
+    }
+
     // Connect to MCP server and fetch available tools
     connectToMCPServer();
   }, []);
@@ -371,6 +383,14 @@ export const MCPClient = () => {
       });
       return;
     }
+    if (!selectedModel) {
+      toast({
+        title: 'Model Required',
+        description: 'Please select a model in settings.',
+        variant: 'destructive'
+      });
+      return;
+    }
 
     const newMessage: Message = {
       id: Date.now().toString(),
@@ -386,32 +406,110 @@ export const MCPClient = () => {
     setIsLoading(true);
 
     try {
-      // Simulate AI response with tool calling
-      setTimeout(() => {
-        const toolsUsed = Math.random() > 0.5 ? [mcpTools[Math.floor(Math.random() * mcpTools.length)]] : [];
+      // Prepare the request based on the provider
+      let requestBody: any;
+      let headers: any = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      };
+
+      const messageContent: any = { role: 'user', content: inputMessage };
+      
+      // Add images if any (for models that support it)
+      if (selectedImages.length > 0 && selectedProvider.name === 'OpenAI') {
+        messageContent.content = [
+          { type: 'text', text: inputMessage },
+          ...selectedImages.map(image => ({
+            type: 'image_url',
+            image_url: { url: image }
+          }))
+        ];
+      }
+
+      if (selectedProvider.name === 'OpenAI') {
+        requestBody = {
+          model: selectedModel,
+          messages: [messageContent],
+          max_tokens: 1000
+        };
+      } else if (selectedProvider.name === 'Anthropic') {
+        headers['x-api-key'] = apiKey;
+        headers['anthropic-version'] = '2023-06-01';
+        delete headers['Authorization'];
         
-        if (toolsUsed.length > 0) {
-          setActiveToolCall(toolsUsed[0].name);
-          setTimeout(() => setActiveToolCall(null), 2000);
+        requestBody = {
+          model: selectedModel,
+          max_tokens: 1000,
+          messages: [messageContent]
+        };
+      } else if (selectedProvider.name === 'Google') {
+        const response = await fetch(`${selectedProvider.baseUrl}/models/${selectedModel}:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{ text: inputMessage }]
+            }]
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Google API error: ${response.status}`);
         }
 
-        const response: Message = {
+        const data = await response.json();
+        const content = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated';
+        
+        const assistantMessage: Message = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: `I've processed your message${selectedImages.length > 0 ? ' and analyzed the image(s)' : ''}. ${toolsUsed.length > 0 ? `I used the ${toolsUsed[0].name} tool to help with your request.` : 'Here is my response based on your input.'}`,
-          toolCalls: toolsUsed.map(tool => ({ name: tool.name, args: {} })),
+          content,
           timestamp: new Date()
         };
 
-        setMessages(prev => [...prev, response]);
+        setMessages(prev => [...prev, assistantMessage]);
         setIsLoading(false);
-      }, 1500);
+        return;
+      }
+
+      // For OpenAI and Anthropic
+      const response = await fetch(selectedProvider.baseUrl + (selectedProvider.name === 'Anthropic' ? '/messages' : '/chat/completions'), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      let content: string;
+
+      if (selectedProvider.name === 'OpenAI') {
+        content = data.choices?.[0]?.message?.content || 'No response generated';
+      } else if (selectedProvider.name === 'Anthropic') {
+        content = data.content?.[0]?.text || 'No response generated';
+      } else {
+        content = 'No response generated';
+      }
+
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content,
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
     } catch (error) {
+      console.error('API Error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to send message.',
+        description: `Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`,
         variant: 'destructive'
       });
+    } finally {
       setIsLoading(false);
     }
   };
@@ -558,6 +656,41 @@ export const MCPClient = () => {
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="Enter your API key"
                 />
+              </div>
+              
+              <div className="flex gap-2 pt-4">
+                <Button 
+                  onClick={() => {
+                    const settings = {
+                      provider: selectedProvider.name,
+                      model: selectedModel,
+                      apiKey: apiKey
+                    };
+                    localStorage.setItem('climaty-settings', JSON.stringify(settings));
+                    toast({
+                      title: 'Settings Saved',
+                      description: 'Your configuration has been saved successfully.',
+                    });
+                  }}
+                  className="flex-1"
+                >
+                  Save Settings
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => {
+                    localStorage.removeItem('climaty-settings');
+                    setApiKey('');
+                    setSelectedProvider(API_PROVIDERS[0]);
+                    setSelectedModel(API_PROVIDERS[0].models[0]);
+                    toast({
+                      title: 'Settings Cleared',
+                      description: 'All settings have been reset.',
+                    });
+                  }}
+                >
+                  Clear
+                </Button>
               </div>
             </div>
             </DialogContent>
