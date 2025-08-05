@@ -586,41 +586,43 @@ export const MCPClient = () => {
                 Logs
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+            <DialogContent className="max-w-4xl max-h-[80vh] flex flex-col">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <Terminal className="w-4 h-4" />
                   Connection Logs
                 </DialogTitle>
               </DialogHeader>
-              <ScrollArea className="flex-1 min-h-[300px] max-h-[400px]">
-                <div className="space-y-1 font-mono text-sm">
-                  {connectionLogs.map((log, index) => (
-                    <div key={index} className={`flex gap-2 p-2 rounded text-xs ${
-                      log.level === 'error' ? 'bg-destructive/10 text-destructive' :
-                      log.level === 'warning' ? 'bg-yellow-500/10 text-yellow-600' :
-                      'bg-muted/50'
-                    }`}>
-                      <span className="text-muted-foreground">
-                        {log.timestamp.toLocaleTimeString()}
-                      </span>
-                      <span className={`font-medium ${
-                        log.level === 'error' ? 'text-destructive' :
-                        log.level === 'warning' ? 'text-yellow-600' :
-                        'text-primary'
+              <div className="flex-1 overflow-hidden">
+                <ScrollArea className="h-[500px] w-full">
+                  <div className="space-y-1 font-mono text-sm p-2">
+                    {connectionLogs.map((log, index) => (
+                      <div key={index} className={`flex gap-2 p-2 rounded text-xs ${
+                        log.level === 'error' ? 'bg-destructive/10 text-destructive' :
+                        log.level === 'warning' ? 'bg-yellow-500/10 text-yellow-600' :
+                        'bg-muted/50'
                       }`}>
-                        [{log.level.toUpperCase()}]
-                      </span>
-                      <span className="flex-1 break-all">{log.message}</span>
-                    </div>
-                  ))}
-                  {connectionLogs.length === 0 && (
-                    <div className="text-muted-foreground text-center py-8">
-                      No logs yet. Connection will be attempted automatically.
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
+                        <span className="text-muted-foreground whitespace-nowrap">
+                          {log.timestamp.toLocaleTimeString()}
+                        </span>
+                        <span className={`font-medium whitespace-nowrap ${
+                          log.level === 'error' ? 'text-destructive' :
+                          log.level === 'warning' ? 'text-yellow-600' :
+                          'text-primary'
+                        }`}>
+                          [{log.level.toUpperCase()}]
+                        </span>
+                        <span className="flex-1 break-words overflow-wrap-anywhere">{log.message}</span>
+                      </div>
+                    ))}
+                    {connectionLogs.length === 0 && (
+                      <div className="text-muted-foreground text-center py-8">
+                        No logs yet. Connection will be attempted automatically.
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+              </div>
             </DialogContent>
           </Dialog>
           
