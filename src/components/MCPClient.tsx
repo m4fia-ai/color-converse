@@ -101,6 +101,10 @@ export const MCPClient = () => {
     addLog('info', 'Server URL: https://final-meta-mcp-server-production.up.railway.app/mcp');
 
     try {
+      // Generate a session ID for this connection
+      const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      addLog('info', `Generated session ID: ${sessionId}`);
+      
       // Step 1: Initialize the MCP session
       addLog('info', 'Step 1: Initializing MCP session...');
       const initResponse = await fetch(
@@ -185,33 +189,34 @@ export const MCPClient = () => {
         throw new Error(initData.error.message || 'Initialize failed');
       }
 
-      // Extract session ID from response headers
-      const sessionId = initResponse.headers.get('Mcp-Session-Id');
-      addLog('info', `Session ID: ${sessionId || 'None provided'}`);
-
+      // Check if session ID was provided in response headers
+      const headerSessionId = initResponse.headers.get('Mcp-Session-Id');
+      addLog('info', `Header Session ID: ${headerSessionId || 'None provided'}`);
+      
+      // Use generated session ID if no header session ID provided
+      const finalSessionId = headerSessionId || sessionId;
+      
       // Step 2: Send initialized notification
-      if (sessionId) {
-        addLog('info', 'Step 2: Sending initialized notification...');
-        const notifyResponse = await fetch(
-          "https://final-meta-mcp-server-production.up.railway.app/mcp",
-          {
-            method: "POST",
-            headers: { 
-              "Content-Type": "application/json",
-              "Accept": "application/json, text/event-stream",
-              "Mcp-Session-Id": sessionId,
-            },
-            body: JSON.stringify({
-              jsonrpc: "2.0",
-              method: "notifications/initialized",
-              params: {}
-            }),
-            mode: "cors",
-          }
-        );
+      addLog('info', 'Step 2: Sending initialized notification...');
+      const notifyResponse = await fetch(
+        "https://final-meta-mcp-server-production.up.railway.app/mcp",
+        {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "Mcp-Session-Id": finalSessionId,
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "notifications/initialized",
+            params: {}
+          }),
+          mode: "cors",
+        }
+      );
 
-        addLog('info', `Initialized notification status: ${notifyResponse.status}`);
-      }
+      addLog('info', `Initialized notification status: ${notifyResponse.status}`);
 
       // Step 3: Get available tools
       addLog('info', 'Step 3: Fetching available tools...');
@@ -222,7 +227,7 @@ export const MCPClient = () => {
           headers: { 
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
-            ...(sessionId && { "Mcp-Session-Id": sessionId }),
+            "Mcp-Session-Id": finalSessionId,
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
