@@ -115,92 +115,57 @@ export const MCPClient = () => {
       //   })
       // });
       // example with the JS fetch API
-      // const response = await fetch(
-      //   "https://final-meta-mcp-server-production.up.railway.app/mcp",
-      //  {
-      //     method: "POST",
-      //     headers: { 
-      //       "Content-Type": "application/json" 
-      //     },
-      //     body: JSON.stringify({
-      //       jsonrpc: "2.0",
-      //       id: 1,
-      //       method:  "tools/list", // built-in RPC
-      //       params: {}
-      //     }),
-      //     mode: "cors",
-      //  }
-      // );
-
-
-      // addLog('info', `HTTP Response Status: ${response.status} ${response.statusText}`);
-
-      // if (!response.ok) {
-      //   throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      // }
-
-      // // const responseText = await response.text();
-      // // addLog('info', `Raw response: ${responseText}`);
-
-      // // let data;
-      // // try {
-      // //   data = await response.json();
-      // // } catch (parseError) {
-      // //   addLog('error', `Failed to parse JSON response: ${parseError}`);
-      // //   throw new Error('Invalid JSON response from server');
-      // // }
-      // const data = await response.json();
-      // if (data.error) {
-      //   addLog('error', `MCP Error: ${data.error.message || JSON.stringify(data.error)}`);
-      //   throw new Error(data.error.message || 'MCP server returned an error');
-      // }
-
-      // if (data.result && data.result.tools) {
-      //   const tools: MCPTool[] = data.result.tools.map((tool: any) => ({
-      //     name: tool.name,
-      //     description: tool.description || 'No description available',
-      //     inputSchema: tool.inputSchema
-      //   }));
-
-      //   setMcpTools(tools);
-      //   setIsConnected(true);
-      //   addLog('info', `Successfully connected! Found ${tools.length} tools:`);
       const response = await fetch(
         "https://final-meta-mcp-server-production.up.railway.app/mcp",
-        {
+       {
           method: "POST",
-          mode:   "cors",
-          headers: {
-            "Content-Type": "application/json",
-            "Accept":       "application/json, text/event-stream"      // ← REQUIRED
+          headers: { 
+            "Content-Type": "application/json" 
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
-            id:      1,
-            method:  "tools/list",                   // ← slash, not dot
-            params:  {}
-          })
-        }
+            id: 1,
+            method:  "tools/list", // built-in RPC
+            params: {}
+          }),
+          mode: "cors",
+       }
       );
 
-      // ---- peel the JSON-RPC payload out of the SSE stream ----
-        const raw = await response.text();            // whole stream in one shot
-        const dataLine = raw.split("\n").find(l => l.startsWith("data:"));
-        if (!dataLine) throw new Error("No data line in SSE reply");
-        
-        const { result, error } = JSON.parse(dataLine.slice(5).trim());
-        
-        if (error) throw new Error(error.message || JSON.stringify(error));
-        
-        const tools: MCPTool[] = result.tools.map((t: any) => ({
-          name:        t.name,
-          description: t.description ?? "No description",
-          inputSchema: t.inputSchema
+
+      addLog('info', `HTTP Response Status: ${response.status} ${response.statusText}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      // const responseText = await response.text();
+      // addLog('info', `Raw response: ${responseText}`);
+
+      // let data;
+      // try {
+      //   data = await response.json();
+      // } catch (parseError) {
+      //   addLog('error', `Failed to parse JSON response: ${parseError}`);
+      //   throw new Error('Invalid JSON response from server');
+      // }
+      const data = await response.json();
+      if (data.error) {
+        addLog('error', `MCP Error: ${data.error.message || JSON.stringify(data.error)}`);
+        throw new Error(data.error.message || 'MCP server returned an error');
+      }
+
+      if (data.result && data.result.tools) {
+        const tools: MCPTool[] = data.result.tools.map((tool: any) => ({
+          name: tool.name,
+          description: tool.description || 'No description available',
+          inputSchema: tool.inputSchema
         }));
-      
+
         setMcpTools(tools);
         setIsConnected(true);
-        addLog("info", `Successfully connected! Found ${tools.length} tools.`);
+        addLog('info', `Successfully connected! Found ${tools.length} tools:`);
+  
 
         tools.forEach(tool => {
           addLog('info', `  - ${tool.name}: ${tool.description}`);
