@@ -143,6 +143,9 @@ export const MCPClient = () => {
       addLog('info', `HTTP Response Status: ${response.status} ${response.statusText}`);
 
       if (!response.ok) {
+        // Get the error response body for debugging
+        const errorText = await response.text();
+        addLog('error', `Server response: ${errorText}`);
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
