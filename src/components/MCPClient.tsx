@@ -101,8 +101,8 @@ export const MCPClient = () => {
     addLog('info', 'Server URL: https://final-meta-mcp-server-production.up.railway.app/mcp');
 
     try {
-      // Generate a session ID for this connection
-      const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      // Generate a simple session ID for this connection
+      const sessionId = `climaty-${Date.now()}`;
       addLog('info', `Generated session ID: ${sessionId}`);
       
       // Step 1: Initialize the MCP session
@@ -114,6 +114,7 @@ export const MCPClient = () => {
           headers: { 
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
+            "Mcp-Session-Id": sessionId,
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
@@ -217,6 +218,10 @@ export const MCPClient = () => {
       );
 
       addLog('info', `Initialized notification status: ${notifyResponse.status}`);
+      if (notifyResponse.status === 400) {
+        const notifyError = await notifyResponse.text();
+        addLog('error', `Notification error: ${notifyError}`);
+      }
 
       // Step 3: Get available tools
       addLog('info', 'Step 3: Fetching available tools...');
