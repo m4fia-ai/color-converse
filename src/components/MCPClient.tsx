@@ -172,7 +172,7 @@ export const MCPClient = () => {
           mode:   "cors",
           headers: {
             "Content-Type": "application/json",
-            "Accept":       "text/event-stream"      // ← REQUIRED
+            "Accept":       "application/json, text/event-stream"      // ← REQUIRED
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
