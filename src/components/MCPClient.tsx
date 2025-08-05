@@ -141,98 +141,87 @@ export const MCPClient = () => {
     return data;
   };
 
+  const getManifest = async (url: string) => {
+    const response = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      mode: 'cors'
+    });
+    const manifest = await response.json();
+    return manifest;
+  };
+
+  const openEventStream = async (url: string) => {
+    try {
+      const resp = await fetch(url, {
+        headers: { Accept: 'text/event-stream' },
+        mode: 'cors'
+      });
+      
+      if (!resp.body) {
+        throw new Error('No response body for event stream');
+      }
+      
+      const reader = resp.body
+        .pipeThrough(new TextDecoderStream())
+        .getReader();
+
+      let buf = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += value;
+        let idx;
+        while ((idx = buf.indexOf('\n')) > -1) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line) continue;
+          try {
+            const evt = JSON.parse(line);
+            if (evt.type === 'manifest') {
+              setMcpTools(evt.data.tools || []);
+              addLog('info', `Received manifest with ${evt.data.tools?.length || 0} tools via SSE`);
+            } else {
+              // Route other events (tool responses, etc.)
+              addLog('info', `Received SSE event: ${evt.type}`);
+            }
+          } catch (parseError) {
+            addLog('warning', `Failed to parse SSE line: ${line}`);
+          }
+        }
+      }
+    } catch (error) {
+      addLog('error', `SSE connection failed: ${error}`);
+    }
+  };
+
   const connectToMCPServer = async () => {
     setIsConnecting(true);
     setIsConnected(false);
     setMcpTools([]);
     setConnectionLogs([]);
     
-    addLog('info', 'Starting MCP connection using mcp-remote bridge...');
+    addLog('info', 'Starting MCP connection with SSE streaming...');
     addLog('info', `Target server: ${serverUrl}`);
 
     try {
-      // Start the MCP remote proxy - following LibreChat's configuration pattern
-      const proxyConfig = {
-        remoteUrl: serverUrl,
-        transport: 'http-only' as const
-      };
-      
-      addLog('info', 'Starting mcp-remote proxy with LibreChat-style configuration...');
-      const startResponse = await fetch('/api/mcp-proxy/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(proxyConfig)
-      });
-      
-      if (!startResponse.ok) {
-        const error = await startResponse.text();
-        throw new Error(`Failed to start mcp-remote proxy: ${error}`);
+      // Get initial manifest
+      addLog('info', 'Fetching initial manifest...');
+      const manifest = await getManifest(serverUrl);
+      if (manifest.tools) {
+        setMcpTools(manifest.tools);
+        addLog('info', `Loaded ${manifest.tools.length} tools from manifest: ${manifest.tools.map((t: MCPTool) => t.name).join(', ')}`);
       }
       
-      addLog('info', 'mcp-remote proxy started successfully');
-      
-      // Wait for proxy to be fully ready
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Step 1: Initialize connection - following MCP protocol spec exactly
-      addLog('info', 'Step 1: Initializing MCP connection...');
-      const initData = await sendMCPRequest('initialize', {
-        protocolVersion: '2025-06-18',
-        capabilities: {
-          roots: { listChanged: true },
-          sampling: {}
-        },
-        clientInfo: {
-          name: 'climaty',
-          version: '1.0.0'
-        }
-      });
-      
-      addLog('info', `Server info: ${initData.result?.serverInfo?.name || 'Unknown'} v${initData.result?.serverInfo?.version || 'Unknown'}`);
-      addLog('info', `Protocol version: ${initData.result?.protocolVersion || 'Unknown'}`);
-      
-      // Step 2: Send initialized notification - required by MCP spec
-      addLog('info', 'Step 2: Sending initialized notification...');
-      try {
-        await sendMCPRequest('initialized');
-        addLog('info', 'Initialized notification sent successfully');
-      } catch (notifyError) {
-        addLog('warning', `Initialized notification failed: ${notifyError} - continuing anyway`);
-      }
-      
-      // Step 3: Get available tools - MCP 2025-06-18 spec compliant
-      addLog('info', 'Step 3: Fetching available tools...');
-      try {
-        const toolsData = await sendMCPRequest('tools/list', {});
-        
-        if (toolsData.result?.tools && Array.isArray(toolsData.result.tools)) {
-          setMcpTools(toolsData.result.tools);
-          addLog('info', `Successfully loaded ${toolsData.result.tools.length} tools: ${toolsData.result.tools.map((t: MCPTool) => t.name).join(', ')}`);
-        } else {
-          addLog('warning', 'No tools found in server response');
-          setMcpTools([]);
-        }
-      } catch (toolsError) {
-        addLog('warning', `Tools list failed: ${toolsError} - server may not support tools`);
-        setMcpTools([]);
-      }
-      
-      // Step 4: Try to get prompts if available
-      try {
-        const promptsData = await sendMCPRequest('prompts/list');
-        if (promptsData.result?.prompts) {
-          addLog('info', `Server also provides ${promptsData.result.prompts.length} prompts`);
-        }
-      } catch (promptsError) {
-        addLog('info', 'Server does not provide prompts (this is normal)');
-      }
+      // Open event stream for real-time updates
+      addLog('info', 'Opening SSE stream for real-time updates...');
+      openEventStream(serverUrl);
       
       setIsConnected(true);
       addLog('info', '✅ MCP connection established successfully!');
       
       toast({
         title: 'MCP Server Connected',
-        description: `Connected to ${initData.result?.serverInfo?.name || 'MCP server'} with ${mcpTools.length} tools available.`,
+        description: `Connected with ${mcpTools.length} tools available.`,
       });
 
     } catch (error) {
