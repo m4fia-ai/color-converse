@@ -121,7 +121,7 @@ export const MCPClient = () => {
           method: "POST",
           headers: { 
             "Content-Type": "application/json" ,
-            "Accept":   "text/event-stream" 
+            "Accept": "application/json" 
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
@@ -140,8 +140,8 @@ export const MCPClient = () => {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const responseText = await response.text();
-      addLog('info', `Raw response: ${responseText}`);
+      // const responseText = await response.text();
+      // addLog('info', `Raw response: ${responseText}`);
 
       let data;
       try {
