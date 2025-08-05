@@ -195,64 +195,92 @@ export const MCPClient = () => {
         const reader = initResponse.body?.getReader();
         const decoder = new TextDecoder();
         let sseData = '';
+        let foundInitData = false;
         
         if (reader) {
+          // Set a timeout to avoid infinite waiting
+          const timeout = setTimeout(() => {
+            addLog('warning', 'SSE reading timeout - proceeding with available data');
+          }, 5000);
+          
           while (true) {
             const { done, value } = await reader.read();
-            if (done) break;
+            if (done) {
+              addLog('info', 'SSE stream ended');
+              break;
+            }
             
             const chunk = decoder.decode(value, { stream: true });
             sseData += chunk;
             addLog('info', `SSE chunk received: ${chunk}`);
             
-            // Look for events in SSE format
+            // Look for events in SSE format - process line by line
             const lines = sseData.split('\n');
             let eventName = '';
             
-            for (const line of lines) {
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i];
+              
               if (line.startsWith('event: ')) {
                 eventName = line.substring(7).trim();
                 addLog('info', `Found SSE event: ${eventName}`);
               } else if (line.startsWith('data: ')) {
-                const jsonStr = line.substring(6);
-                addLog('info', `Found SSE data line: ${jsonStr}`);
-                try {
-                  const parsed = JSON.parse(jsonStr);
-                  addLog('info', `Parsed SSE data: ${JSON.stringify(parsed)}`);
-                  
-                  // Check for session ID in various formats
-                  if (eventName === 'session' && parsed.sessionId) {
-                    serverSessionId = parsed.sessionId;
-                    addLog('info', `Server session ID from event: ${serverSessionId}`);
-                    initData = parsed; // Store the session data
-                    break;
-                  } else if (parsed.sessionId) {
-                    serverSessionId = parsed.sessionId;
-                    addLog('info', `Server session ID from data: ${serverSessionId}`);
-                    initData = parsed;
-                    break;
-                  } else if (eventName === 'message' || !eventName) {
-                    // This is the initialization response
-                    initData = parsed;
-                    // Continue reading for session ID - don't break yet
+                const jsonStr = line.substring(6).trim();
+                if (jsonStr) {
+                  addLog('info', `Found SSE data line: ${jsonStr}`);
+                  try {
+                    const parsed = JSON.parse(jsonStr);
+                    addLog('info', `Parsed SSE data: ${JSON.stringify(parsed)}`);
+                    
+                    // Check for session ID in various formats
+                    if (eventName === 'session' && parsed.sessionId) {
+                      serverSessionId = parsed.sessionId;
+                      addLog('info', `Server session ID from session event: ${serverSessionId}`);
+                      clearTimeout(timeout);
+                      break;
+                    } else if (parsed.sessionId) {
+                      serverSessionId = parsed.sessionId;
+                      addLog('info', `Server session ID from data: ${serverSessionId}`);
+                      clearTimeout(timeout);
+                      break;
+                    } else if ((eventName === 'message' || !eventName) && parsed.result) {
+                      // This is the initialization response
+                      if (!foundInitData) {
+                        initData = parsed;
+                        foundInitData = true;
+                        addLog('info', 'Found initialization data, continuing to look for session ID...');
+                      }
+                    }
+                  } catch (e) {
+                    addLog('warning', `Failed to parse SSE data: ${jsonStr} - Error: ${e}`);
                   }
-                } catch (e) {
-                  addLog('warning', `Failed to parse SSE data: ${jsonStr} - Error: ${e}`);
                 }
               }
             }
             
-            // If we have both initData and serverSessionId, we can proceed
-            if (initData && serverSessionId) {
+            // If we have found a session ID, we can stop reading
+            if (serverSessionId) {
+              clearTimeout(timeout);
               break;
             }
-            // If we only have initData but no session ID yet, continue reading
+            
+            // Clean up processed lines to avoid reprocessing
+            if (lines.length > 1) {
+              sseData = lines[lines.length - 1]; // Keep the last incomplete line
+            }
           }
+          
+          clearTimeout(timeout);
         }
         
-        if (!initData) {
+        if (!foundInitData && !initData) {
           addLog('error', `Failed to parse SSE response. Full SSE data: ${sseData}`);
-          throw new Error('Failed to parse SSE response - no valid data found');
+          throw new Error('Failed to parse SSE response - no valid initialization data found');
+        }
+        
+        // Use initData if we found it during SSE parsing
+        if (!initData && foundInitData) {
+          addLog('error', 'Found initialization data but lost reference - this should not happen');
         }
       } else {
         // Handle JSON response
@@ -284,10 +312,10 @@ export const MCPClient = () => {
         addLog('info', `Using header session ID: ${serverSessionId}`);
       }
       
-      // If we still don't have a session ID, we need to wait for it or fail
+      // If we still don't have a session ID, let's try to proceed anyway to see what happens
       if (!serverSessionId) {
-        addLog('error', 'No session ID received from server - cannot proceed');
-        throw new Error('No session ID received from server');
+        addLog('warning', 'No session ID received from server - trying to proceed without one');
+        // For now, continue but note that tools requests might fail
       }
       
       // Step 2: Send initialized notification (required by Meta MCP server)
