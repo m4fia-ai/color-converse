@@ -1,0 +1,454 @@
+import { useState, useEffect, useRef } from 'react';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Card } from './ui/card';
+import { Badge } from './ui/badge';
+import { ScrollArea } from './ui/scroll-area';
+import { Textarea } from './ui/textarea';
+import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
+import { Label } from './ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { useToast } from '@/hooks/use-toast';
+
+interface MCPTool {
+  name: string;
+  description: string;
+  inputSchema?: any;
+}
+
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  images?: string[];
+  toolCalls?: { name: string; args: any }[];
+  timestamp: Date;
+}
+
+interface APIProvider {
+  name: string;
+  baseUrl: string;
+  models: string[];
+}
+
+const API_PROVIDERS: APIProvider[] = [
+  {
+    name: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo']
+  },
+  {
+    name: 'Anthropic',
+    baseUrl: 'https://api.anthropic.com/v1',
+    models: ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307']
+  },
+  {
+    name: 'Google',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    models: ['gemini-2.0-flash-exp', 'gemini-1.5-pro']
+  }
+];
+
+export const MCPClient = () => {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputMessage, setInputMessage] = useState('');
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [mcpTools, setMcpTools] = useState<MCPTool[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [selectedProvider, setSelectedProvider] = useState<APIProvider>(API_PROVIDERS[0]);
+  const [selectedModel, setSelectedModel] = useState('');
+  const [activeToolCall, setActiveToolCall] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Connect to MCP server and fetch available tools
+    connectToMCPServer();
+  }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const connectToMCPServer = async () => {
+    try {
+      // Simulate connecting to the MCP server
+      // In a real implementation, you would connect to the actual MCP server
+      setIsConnected(true);
+      
+      // Mock tools that would be available from the meta MCP server
+      const mockTools: MCPTool[] = [
+        {
+          name: 'search_web',
+          description: 'Search the web for current information'
+        },
+        {
+          name: 'read_webpage',
+          description: 'Read and extract content from a webpage'
+        },
+        {
+          name: 'get_weather',
+          description: 'Get current weather information for a location'
+        },
+        {
+          name: 'analyze_image',
+          description: 'Analyze and describe images'
+        },
+        {
+          name: 'generate_code',
+          description: 'Generate code snippets in various languages'
+        }
+      ];
+      
+      setMcpTools(mockTools);
+      toast({
+        title: 'MCP Server Connected',
+        description: `Connected successfully. ${mockTools.length} tools available.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Connection Failed',
+        description: 'Failed to connect to MCP server.',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files) {
+      Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          if (e.target?.result) {
+            setSelectedImages(prev => [...prev, e.target!.result as string]);
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setSelectedImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const sendMessage = async () => {
+    if (!inputMessage.trim() && selectedImages.length === 0) return;
+    if (!apiKey) {
+      toast({
+        title: 'API Key Required',
+        description: 'Please set your API key in settings.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    const newMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: inputMessage,
+      images: selectedImages.length > 0 ? [...selectedImages] : undefined,
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, newMessage]);
+    setInputMessage('');
+    setSelectedImages([]);
+    setIsLoading(true);
+
+    try {
+      // Simulate AI response with tool calling
+      setTimeout(() => {
+        const toolsUsed = Math.random() > 0.5 ? [mcpTools[Math.floor(Math.random() * mcpTools.length)]] : [];
+        
+        if (toolsUsed.length > 0) {
+          setActiveToolCall(toolsUsed[0].name);
+          setTimeout(() => setActiveToolCall(null), 2000);
+        }
+
+        const response: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: `I've processed your message${selectedImages.length > 0 ? ' and analyzed the image(s)' : ''}. ${toolsUsed.length > 0 ? `I used the ${toolsUsed[0].name} tool to help with your request.` : 'Here is my response based on your input.'}`,
+          toolCalls: toolsUsed.map(tool => ({ name: tool.name, args: {} })),
+          timestamp: new Date()
+        };
+
+        setMessages(prev => [...prev, response]);
+        setIsLoading(false);
+      }, 1500);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to send message.',
+        variant: 'destructive'
+      });
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  return (
+    <div className="h-screen flex flex-col bg-background">
+      {/* Header */}
+      <div className="border-b border-border p-4 flex items-center justify-between bg-card">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+            <Bot className="w-5 h-5 text-primary-foreground" />
+          </div>
+          <div>
+            <h1 className="font-semibold text-card-foreground">MCP Client</h1>
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+              <span className="text-sm text-muted-foreground">
+                {isConnected ? `${mcpTools.length} tools available` : 'Disconnected'}
+              </span>
+            </div>
+          </div>
+        </div>
+        
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Settings className="w-4 h-4 mr-2" />
+              Settings
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>API Configuration</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="provider">Provider</Label>
+                <Select 
+                  value={selectedProvider.name} 
+                  onValueChange={(value) => {
+                    const provider = API_PROVIDERS.find(p => p.name === value)!;
+                    setSelectedProvider(provider);
+                    setSelectedModel(provider.models[0]);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {API_PROVIDERS.map(provider => (
+                      <SelectItem key={provider.name} value={provider.name}>
+                        {provider.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label htmlFor="model">Model</Label>
+                <Select value={selectedModel} onValueChange={setSelectedModel}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedProvider.models.map(model => (
+                      <SelectItem key={model} value={model}>
+                        {model}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label htmlFor="apiKey">API Key</Label>
+                <Input
+                  id="apiKey"
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Enter your API key"
+                />
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Tools Panel */}
+      <div className="border-b border-border p-4 bg-muted/30">
+        <div className="flex items-center gap-2 mb-2">
+          <Wrench className="w-4 h-4 text-muted-foreground" />
+          <span className="text-sm font-medium text-muted-foreground">Available Tools</span>
+          {activeToolCall && (
+            <Badge variant="secondary" className="flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              {activeToolCall}
+            </Badge>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {mcpTools.map((tool) => (
+            <Badge key={tool.name} variant="outline" className="text-xs">
+              {tool.name}
+            </Badge>
+          ))}
+        </div>
+      </div>
+
+      {/* Messages */}
+      <ScrollArea className="flex-1 p-4">
+        <div className="space-y-4 max-w-4xl mx-auto">
+          {messages.length === 0 && (
+            <div className="text-center py-12">
+              <Bot className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-muted-foreground mb-2">Welcome to MCP Client</h3>
+              <p className="text-muted-foreground">Start a conversation to interact with MCP tools</p>
+            </div>
+          )}
+          
+          {messages.map((message) => (
+            <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              {message.role === 'assistant' && (
+                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
+                  <Bot className="w-4 h-4 text-primary-foreground" />
+                </div>
+              )}
+              
+              <div className={`max-w-[70%] ${message.role === 'user' ? 'order-first' : ''}`}>
+                <Card className={`p-4 ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>
+                  {message.images && message.images.length > 0 && (
+                    <div className="mb-3 grid grid-cols-2 gap-2">
+                      {message.images.map((image, index) => (
+                        <img 
+                          key={index} 
+                          src={image} 
+                          alt={`Uploaded image ${index + 1}`}
+                          className="rounded-lg max-h-32 object-cover"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  
+                  <p className="whitespace-pre-wrap">{message.content}</p>
+                  
+                  {message.toolCalls && message.toolCalls.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {message.toolCalls.map((toolCall, index) => (
+                        <Badge key={index} variant="secondary" className="text-xs">
+                          <Wrench className="w-3 h-3 mr-1" />
+                          {toolCall.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+                
+                <div className="text-xs text-muted-foreground mt-1 px-1">
+                  {message.timestamp.toLocaleTimeString()}
+                </div>
+              </div>
+              
+              {message.role === 'user' && (
+                <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
+                  <User className="w-4 h-4 text-secondary-foreground" />
+                </div>
+              )}
+            </div>
+          ))}
+          
+          {isLoading && (
+            <div className="flex gap-3 justify-start">
+              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
+                <Bot className="w-4 h-4 text-primary-foreground" />
+              </div>
+              <Card className="p-4 bg-card">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-muted-foreground">Thinking...</span>
+                </div>
+              </Card>
+            </div>
+          )}
+          
+          <div ref={messagesEndRef} />
+        </div>
+      </ScrollArea>
+
+      {/* Input Area */}
+      <div className="border-t border-border p-4 bg-card">
+        <div className="max-w-4xl mx-auto">
+          {selectedImages.length > 0 && (
+            <div className="mb-3 flex gap-2 flex-wrap">
+              {selectedImages.map((image, index) => (
+                <div key={index} className="relative">
+                  <img 
+                    src={image} 
+                    alt={`Selected ${index + 1}`}
+                    className="w-16 h-16 object-cover rounded-lg border"
+                  />
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="absolute -top-2 -right-2 w-6 h-6 rounded-full p-0"
+                    onClick={() => removeImage(index)}
+                  >
+                    ×
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading}
+            >
+              <Paperclip className="w-4 h-4" />
+            </Button>
+            
+            <div className="flex-1 relative">
+              <Textarea
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyDown={handleKeyPress}
+                placeholder="Type your message..."
+                className="min-h-[44px] resize-none pr-12"
+                disabled={isLoading}
+              />
+              <Button
+                size="sm"
+                onClick={sendMessage}
+                disabled={isLoading || (!inputMessage.trim() && selectedImages.length === 0)}
+                className="absolute right-2 bottom-2"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+          
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleImageUpload}
+            className="hidden"
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
