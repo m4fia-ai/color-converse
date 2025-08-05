@@ -113,9 +113,30 @@ export const MCPClient = () => {
     addLog('info', 'Server URL: https://final-meta-mcp-server-production.up.railway.app/mcp');
 
     try {
-      // Generate a simple session ID for this connection
-      const sessionId = `climaty-${Date.now()}`;
-      addLog('info', `Generated session ID: ${sessionId}`);
+      // Will store the server-provided session ID
+      let serverSessionId = '';
+      
+      const MCP_URL = "https://final-meta-mcp-server-production.up.railway.app/mcp";
+      
+      // Helper function to make JSON-RPC calls with proper session ID
+      const rpc = async (method: string, params = {}) => {
+        return fetch(MCP_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/event-stream',
+            'mcp-session-id': serverSessionId,
+            'User-Agent': 'climaty-mcp-client/1.0.0'
+          },
+          body: JSON.stringify({ 
+            jsonrpc: '2.0', 
+            id: Date.now(), 
+            method, 
+            params 
+          }),
+          mode: 'cors'
+        });
+      };
       
       // Step 1: Initialize the MCP session using proper HTTP transport
       addLog('info', 'Step 1: Initializing MCP session...');
@@ -169,7 +190,7 @@ export const MCPClient = () => {
       const contentType = initResponse.headers.get('content-type') || '';
       
       if (contentType.includes('text/event-stream')) {
-        // Handle SSE response
+        // Handle SSE response and wait for server session ID
         addLog('info', 'Handling SSE response...');
         const reader = initResponse.body?.getReader();
         const decoder = new TextDecoder();
@@ -184,22 +205,48 @@ export const MCPClient = () => {
             sseData += chunk;
             addLog('info', `SSE chunk received: ${chunk}`);
             
-            // Look for data lines in SSE format
+            // Look for events in SSE format
             const lines = sseData.split('\n');
+            let eventName = '';
+            
             for (const line of lines) {
-              if (line.startsWith('data: ')) {
+              if (line.startsWith('event: ')) {
+                eventName = line.substring(7).trim();
+                addLog('info', `Found SSE event: ${eventName}`);
+              } else if (line.startsWith('data: ')) {
                 const jsonStr = line.substring(6);
                 addLog('info', `Found SSE data line: ${jsonStr}`);
                 try {
-                  initData = JSON.parse(jsonStr);
-                  addLog('info', `Parsed SSE data: ${JSON.stringify(initData)}`);
-                  break;
+                  const parsed = JSON.parse(jsonStr);
+                  addLog('info', `Parsed SSE data: ${JSON.stringify(parsed)}`);
+                  
+                  // Check for session ID in various formats
+                  if (eventName === 'session' && parsed.sessionId) {
+                    serverSessionId = parsed.sessionId;
+                    addLog('info', `Server session ID from event: ${serverSessionId}`);
+                    initData = parsed; // Store the session data
+                    break;
+                  } else if (parsed.sessionId) {
+                    serverSessionId = parsed.sessionId;
+                    addLog('info', `Server session ID from data: ${serverSessionId}`);
+                    initData = parsed;
+                    break;
+                  } else if (eventName === 'message' || !eventName) {
+                    // This is the initialization response
+                    initData = parsed;
+                    // Continue reading for session ID - don't break yet
+                  }
                 } catch (e) {
                   addLog('warning', `Failed to parse SSE data: ${jsonStr} - Error: ${e}`);
                 }
               }
             }
-            if (initData) break;
+            
+            // If we have both initData and serverSessionId, we can proceed
+            if (initData && serverSessionId) {
+              break;
+            }
+            // If we only have initData but no session ID yet, continue reading
           }
         }
         
@@ -231,45 +278,31 @@ export const MCPClient = () => {
                              initResponse.headers.get('session-id');
       addLog('info', `Header Session ID: ${headerSessionId || 'None provided'}`);
       
-      // Use generated session ID if no header session ID provided
-      const finalSessionId = headerSessionId || sessionId;
+      // Use header session ID if available, otherwise use the one from SSE
+      if (headerSessionId) {
+        serverSessionId = headerSessionId;
+        addLog('info', `Using header session ID: ${serverSessionId}`);
+      }
       
-      // Step 2: Skip initialized notification for now (server might not require it)
-      addLog('info', 'Step 2: Skipping initialized notification (server might not require it)...');
+      // If we still don't have a session ID, we need to wait for it or fail
+      if (!serverSessionId) {
+        addLog('error', 'No session ID received from server - cannot proceed');
+        throw new Error('No session ID received from server');
+      }
       
-      // Step 3: Get available tools (try completely stateless)
-      addLog('info', 'Step 3: Fetching available tools (completely stateless - no session)...');
+      // Step 2: Send initialized notification (required by Meta MCP server)
+      addLog('info', 'Step 2: Sending initialized notification...');
+      try {
+        const initializedResponse = await rpc('initialized', {});
+        addLog('info', `Initialized notification sent successfully: ${initializedResponse.status}`);
+      } catch (initError) {
+        addLog('warning', `Initialized notification failed: ${initError} - continuing anyway`);
+      }
       
-      const toolsHeaders = { 
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
-        "User-Agent": "climaty-mcp-client/1.0.0",
-      };
+      // Step 3: Get available tools using the server session ID
+      addLog('info', `Step 3: Fetching available tools using session ID: ${serverSessionId}`);
       
-      const toolsRequestBody = {
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/list",
-        params: {}
-      };
-      
-      addLog('info', `Tools request headers: ${JSON.stringify(toolsHeaders)}`);
-      addLog('info', `Tools request body: ${JSON.stringify(toolsRequestBody)}`);
-      addLog('info', 'Attempting stateless tools request (no session ID)');
-      
-      const toolsResponse = await fetch(
-        "https://final-meta-mcp-server-production.up.railway.app/mcp",
-        {
-          method: "POST",
-          headers: {
-            ...toolsHeaders,
-            "mcp-session-id": sessionId, // Keep session in headers
-          },
-          body: JSON.stringify(toolsRequestBody),
-          mode: "cors",
-          // Remove credentials: "include" - it's causing CORS issues
-        }
-      );
+      const toolsResponse = await rpc('tools/list', {});
 
       addLog('info', `Tools Response Status: ${toolsResponse.status} ${toolsResponse.statusText}`);
 
