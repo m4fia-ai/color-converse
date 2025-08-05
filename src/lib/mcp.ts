@@ -7,6 +7,8 @@ export async function connectMCP(
   onManifest: (m: MCPManifest) => void,
   onEvent: (evt: any) => void,
 ) {
+  console.log(`[MCP] Attempting to connect to: ${url}`);
+  
   const resp = await fetch(url, {
     mode: "cors",
     headers: {
@@ -14,7 +16,16 @@ export async function connectMCP(
       Accept: "application/x-ndjson, text/event-stream"
     }
   });
-  if (!resp.ok) throw new Error(`MCP connect failed: ${resp.status}`);
+  
+  console.log(`[MCP] Response status: ${resp.status} ${resp.statusText}`);
+  console.log(`[MCP] Response headers:`, Object.fromEntries(resp.headers.entries()));
+  
+  if (!resp.ok) {
+    // Get response body for better error message
+    const errorText = await resp.text();
+    console.error(`[MCP] Error response body:`, errorText);
+    throw new Error(`MCP connect failed: ${resp.status} - ${errorText || resp.statusText}`);
+  }
 
   // Convert the stream into text lines
   const reader = resp.body!

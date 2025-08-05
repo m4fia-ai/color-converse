@@ -161,13 +161,14 @@ export const MCPClient = () => {
       // Use the smart streamer that reads manifest from first line
       addLog('info', 'Opening MCP stream to read manifest...');
       
-      connectMCP(
+      await connectMCP(
         serverUrl,
         (manifest) => {
           // This fires when we get the first manifest frame
           setMcpTools(manifest.tools || []);
           addLog('info', `✅ Got manifest with ${manifest.tools?.length || 0} tools: ${manifest.tools?.map((t: MCPTool) => t.name).join(', ') || 'none'}`);
           setIsConnected(true);
+          setIsConnecting(false);  // Set this here when we actually get the manifest
           
           toast({
             title: 'MCP Server Connected',
@@ -184,12 +185,12 @@ export const MCPClient = () => {
       addLog('error', `❌ Connection failed: ${errorMessage}`);
       
       setIsConnected(false);
+      setIsConnecting(false);  // Make sure to clear connecting state on error
       toast({
         title: 'Connection Failed',
         description: `Failed to connect to MCP server: ${errorMessage}`,
         variant: 'destructive'
       });
-      setIsConnecting(false);
     }
   };
 
