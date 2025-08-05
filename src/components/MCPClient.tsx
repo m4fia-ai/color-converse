@@ -147,11 +147,11 @@ export const MCPClient = () => {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
-            "mcp-session-id": sessionId, // Try adding session to init
+            "mcp-session-id": sessionId, // Keep session ID in init
           },
           body: JSON.stringify(initRequest),
           mode: "cors",
-          credentials: "include", // Include cookies for session persistence
+          // Remove credentials: "include" - it's causing CORS issues
         }
       );
 
@@ -264,11 +264,11 @@ export const MCPClient = () => {
           method: "POST",
           headers: {
             ...toolsHeaders,
-            "mcp-session-id": sessionId, // Add session back to headers
+            "mcp-session-id": sessionId, // Keep session in headers
           },
           body: JSON.stringify(toolsRequestBody),
           mode: "cors",
-          credentials: "include", // Include cookies for session persistence
+          // Remove credentials: "include" - it's causing CORS issues
         }
       );
 
