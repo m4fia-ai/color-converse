@@ -247,7 +247,11 @@ export const MCPClient = () => {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
-            "mcp-session-id": sessionId, // Use our original generated session ID
+            // Try multiple session header formats
+            "mcp-session-id": sessionId,
+            "x-session-id": sessionId,
+            "session-id": sessionId,
+            "authorization": `Bearer ${sessionId}`,
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
