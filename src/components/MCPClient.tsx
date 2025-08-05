@@ -110,13 +110,13 @@ export const MCPClient = () => {
     setMcpTools([]);
     
     addLog('info', 'Attempting to connect to MCP server...');
-    addLog('info', 'Server URL: https://final-meta-mcp-server-production.up.railway.app/mcp');
+    addLog('info', 'Server URL: /api/mcp (proxied)');
 
     try {
       // Will store the server-provided session ID
       let serverSessionId = '';
       
-      const MCP_URL = "https://final-meta-mcp-server-production.up.railway.app/mcp";
+      const MCP_URL = "/api/mcp";
       
       // Helper function to make JSON-RPC calls with proper session ID
       const rpc = async (method: string, params = {}) => {
@@ -160,20 +160,17 @@ export const MCPClient = () => {
 
       addLog('info', `Sending initialize request: ${JSON.stringify(initRequest)}`);
 
-      const initResponse = await fetch(
-        "https://final-meta-mcp-server-production.up.railway.app/mcp",
-        {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            "User-Agent": "climaty-mcp-client/1.0.0",
-            // Don't send session ID in initialization - this should establish the session
-          },
-          body: JSON.stringify(initRequest),
-          mode: "cors",
-        }
-      );
+      const initResponse = await fetch(MCP_URL, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/event-stream",
+          "User-Agent": "climaty-mcp-client/1.0.0",
+          // Don't send session ID in initialization - this should establish the session
+        },
+        body: JSON.stringify(initRequest),
+        mode: "cors",
+      });
 
       addLog('info', `Initialize Response Status: ${initResponse.status} ${initResponse.statusText}`);
       addLog('info', `Content-Type: ${initResponse.headers.get('content-type')}`);
