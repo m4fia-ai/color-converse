@@ -1,41 +1,60 @@
-export async function getManifest(base: string) {
-  // Try different manifest endpoints since the server might not have /manifest
-  const endpoints = [
-    `${base}/manifest`,  // Standard manifest endpoint
-    base,                // Root endpoint might return manifest
-    `${base}/tools`,     // Tools endpoint
-  ];
+interface MCPManifest {
+  tools: any[];
+}
 
-  for (const endpoint of endpoints) {
-    try {
-      console.log(`[MCP] Trying manifest endpoint: ${endpoint}`);
-      const res = await fetch(endpoint, {
-        mode: "cors",
-        headers: { Accept: "application/json" }
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        console.log(`[MCP] Successfully fetched from ${endpoint}:`, data);
-        
-        // Check if response has tools directly or nested
-        if (data.tools) {
-          return data;
-        } else if (Array.isArray(data)) {
-          return { tools: data };
-        } else if (data.result && data.result.tools) {
-          return data.result;
-        }
-        
-        // If we get here, the endpoint responded but doesn't have tools
-        console.log(`[MCP] Endpoint ${endpoint} responded but no tools found in:`, data);
-      } else {
-        console.log(`[MCP] Endpoint ${endpoint} returned ${res.status}`);
+export async function connectMCP(
+  url: string,
+  onManifest: (m: MCPManifest) => void,
+  onEvent: (evt: any) => void,
+) {
+  const resp = await fetch(url, {
+    mode: "cors",
+    headers: {
+      // The server is http-only (NDJSON), but Accepting both is harmless
+      Accept: "application/x-ndjson, text/event-stream"
+    }
+  });
+  if (!resp.ok) throw new Error(`MCP connect failed: ${resp.status}`);
+
+  // Convert the stream into text lines
+  const reader = resp.body!
+    .pipeThrough(new TextDecoderStream())
+    .getReader();
+
+  let buf = "";
+  let gotManifest = false;
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+
+    let idx;
+    while ((idx = buf.indexOf("\n")) > -1) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+
+      if (!line) continue;                              // skip keep-alives
+
+      // Some servers prefix NDJSON with "data:" (SSE style)
+      const jsonString = line.startsWith("data:")
+        ? line.slice(5)
+        : line;
+
+      let obj: any;
+      try {
+        obj = JSON.parse(jsonString);
+      } catch {
+        console.warn("Non-JSON MCP frame:", line);
+        continue;
       }
-    } catch (error) {
-      console.log(`[MCP] Failed to fetch from ${endpoint}:`, error);
+
+      if (!gotManifest && obj.type === "manifest") {
+        gotManifest = true;
+        onManifest(obj.data);                           // ← tools, etc.
+      } else {
+        onEvent(obj);                                   // ← tool responses
+      }
     }
   }
-  
-  throw new Error(`No manifest found. Tried endpoints: ${endpoints.join(', ')}`);
 }

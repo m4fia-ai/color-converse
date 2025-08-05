@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getManifest } from '@/lib/mcp';
+import { connectMCP } from '@/lib/mcp';
 
 interface MCPTool {
   name: string;
@@ -142,48 +142,10 @@ export const MCPClient = () => {
     return data;
   };
 
-  const openEventStream = async (url: string) => {
-    try {
-      const resp = await fetch(url, {
-        mode: "cors",
-        headers: { Accept: "text/event-stream" }
-      });
-      
-      if (!resp.body) {
-        throw new Error('No response body for event stream');
-      }
-      
-      const reader = resp.body
-        .pipeThrough(new TextDecoderStream())
-        .getReader();
-
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += value;
-        let idx;
-        while ((idx = buf.indexOf('\n')) > -1) {
-          const line = buf.slice(0, idx).trim();
-          buf = buf.slice(idx + 1);
-          if (!line) continue;
-          try {
-            const evt = JSON.parse(line);
-            if (evt.type === 'manifest') {
-              setMcpTools(evt.data.tools || []);
-              addLog('info', `Received manifest update with ${evt.data.tools?.length || 0} tools via SSE`);
-            } else {
-              // Route other events (tool responses, etc.)
-              addLog('info', `Received SSE event: ${evt.type}`);
-            }
-          } catch (parseError) {
-            addLog('warning', `Failed to parse SSE line: ${line}`);
-          }
-        }
-      }
-    } catch (error) {
-      addLog('error', `SSE connection failed: ${error}`);
-    }
+  const handleMCPEvent = (evt: any) => {
+    // Route tool responses and other events
+    addLog('info', `Received MCP event: ${evt.type || 'unknown'}`);
+    console.log('MCP Event:', evt);
   };
 
   const connectToMCPServer = async () => {
@@ -192,29 +154,30 @@ export const MCPClient = () => {
     setMcpTools([]);
     setConnectionLogs([]);
     
-    addLog('info', 'Starting MCP connection with instant manifest + SSE...');
+    addLog('info', 'Starting MCP connection by reading manifest from stream...');
     addLog('info', `Target server: ${serverUrl}`);
 
     try {
-      // Step 1: Get initial manifest (instant tools list)
-      addLog('info', 'Fetching instant manifest...');
-      const manifest = await getManifest(serverUrl);
-      if (manifest.tools) {
-        setMcpTools(manifest.tools);
-        addLog('info', `✅ Loaded ${manifest.tools.length} tools from manifest: ${manifest.tools.map((t: MCPTool) => t.name).join(', ')}`);
-      }
+      // Use the smart streamer that reads manifest from first line
+      addLog('info', 'Opening MCP stream to read manifest...');
       
-      // Step 2: Open event stream for real-time updates (keeps connection alive)
-      addLog('info', 'Opening SSE stream for real-time updates...');
-      openEventStream(serverUrl);
+      connectMCP(
+        serverUrl,
+        (manifest) => {
+          // This fires when we get the first manifest frame
+          setMcpTools(manifest.tools || []);
+          addLog('info', `✅ Got manifest with ${manifest.tools?.length || 0} tools: ${manifest.tools?.map((t: MCPTool) => t.name).join(', ') || 'none'}`);
+          setIsConnected(true);
+          
+          toast({
+            title: 'MCP Server Connected',
+            description: `Connected with ${manifest.tools?.length || 0} tools available.`,
+          });
+        },
+        handleMCPEvent  // Handle subsequent events
+      );
       
-      setIsConnected(true);
-      addLog('info', '✅ MCP connection established successfully!');
-      
-      toast({
-        title: 'MCP Server Connected',
-        description: `Connected with ${manifest.tools?.length || 0} tools available.`,
-      });
+      addLog('info', '✅ MCP stream connection established!');
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -226,7 +189,6 @@ export const MCPClient = () => {
         description: `Failed to connect to MCP server: ${errorMessage}`,
         variant: 'destructive'
       });
-    } finally {
       setIsConnecting(false);
     }
   };
