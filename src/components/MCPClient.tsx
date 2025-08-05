@@ -117,99 +117,172 @@ export const MCPClient = () => {
       const sessionId = `climaty-${Date.now()}`;
       addLog('info', `Generated session ID: ${sessionId}`);
       
-      // Step 1: Initialize the MCP session
+      // Step 1: Initialize the MCP session using proper HTTP transport
       addLog('info', 'Step 1: Initializing MCP session...');
+      
+      const initRequest = {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {
+            roots: { listChanged: true },
+            sampling: {}
+          },
+          clientInfo: {
+            name: "climaty",
+            version: "1.0.0"
+          }
+        }
+      };
+
+      addLog('info', `Sending initialize request: ${JSON.stringify(initRequest)}`);
+
       const initResponse = await fetch(
         "https://final-meta-mcp-server-production.up.railway.app/mcp",
         {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            "Mcp-Session-Id": sessionId,
+            "Accept": "application/json",
+            "User-Agent": "climaty-mcp-client/1.0.0",
+            // Add session tracking headers
+            "x-mcp-client-session": sessionId,
           },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 1,
-            method: "initialize",
-            params: {
-              protocolVersion: "2025-06-18",
-              capabilities: {
-                roots: { listChanged: true },
-                sampling: {}
-              },
-              clientInfo: {
-                name: "climaty",
-                version: "1.0.0"
-              }
-            }
-          }),
+          body: JSON.stringify(initRequest),
           mode: "cors",
         }
       );
 
       addLog('info', `Initialize Response Status: ${initResponse.status} ${initResponse.statusText}`);
       addLog('info', `Content-Type: ${initResponse.headers.get('content-type')}`);
+      addLog('info', `Response Headers: ${JSON.stringify(Object.fromEntries(initResponse.headers.entries()))}`);
 
       if (!initResponse.ok) {
         const errorText = await initResponse.text();
         addLog('error', `Initialize failed: ${errorText}`);
+        
+        // Try alternative approach without session headers
+        if (initResponse.status === 400) {
+          addLog('info', 'Retrying without session headers...');
+          
+          const retryResponse = await fetch(
+            "https://final-meta-mcp-server-production.up.railway.app/mcp",
+            {
+              method: "POST",
+              headers: { 
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "climaty-mcp-client/1.0.0",
+              },
+              body: JSON.stringify(initRequest),
+              mode: "cors",
+            }
+          );
+
+          addLog('info', `Retry Response Status: ${retryResponse.status} ${retryResponse.statusText}`);
+          
+          if (!retryResponse.ok) {
+            const retryErrorText = await retryResponse.text();
+            addLog('error', `Retry failed: ${retryErrorText}`);
+            throw new Error(`HTTP ${retryResponse.status}: ${retryResponse.statusText}`);
+          } else {
+            // Use the retry response
+            const initData = await retryResponse.json();
+            addLog('info', `Retry successful: ${JSON.stringify(initData)}`);
+            
+            if (initData.error) {
+              addLog('error', `Initialize Error: ${initData.error.message || JSON.stringify(initData.error)}`);
+              throw new Error(initData.error.message || 'Initialize failed');
+            }
+
+            // Skip to tools request without session management
+            addLog('info', 'Step 2: Fetching available tools (no session)...');
+            const toolsResponse = await fetch(
+              "https://final-meta-mcp-server-production.up.railway.app/mcp",
+              {
+                method: "POST",
+                headers: { 
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+                  "User-Agent": "climaty-mcp-client/1.0.0",
+                },
+                body: JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: 2,
+                  method: "tools/list",
+                  params: {}
+                }),
+                mode: "cors",
+              }
+            );
+
+            addLog('info', `Tools Response Status: ${toolsResponse.status} ${toolsResponse.statusText}`);
+
+            if (!toolsResponse.ok) {
+              const errorText = await toolsResponse.text();
+              addLog('error', `Tools request failed: ${errorText}`);
+              throw new Error(`HTTP ${toolsResponse.status}: ${toolsResponse.statusText}`);
+            }
+
+            const toolsData = await toolsResponse.json();
+            addLog('info', `Tools response: ${JSON.stringify(toolsData)}`);
+
+            if (toolsData.error) {
+              addLog('error', `Tools Error: ${toolsData.error.message || JSON.stringify(toolsData.error)}`);
+              throw new Error(toolsData.error.message || 'Tools request failed');
+            }
+
+            if (toolsData.result && toolsData.result.tools) {
+              const tools: MCPTool[] = toolsData.result.tools.map((tool: any) => ({
+                name: tool.name,
+                description: tool.description || 'No description available',
+                inputSchema: tool.inputSchema
+              }));
+
+              setMcpTools(tools);
+              setIsConnected(true);
+              addLog('info', `Successfully connected! Found ${tools.length} tools:`);
+
+              tools.forEach(tool => {
+                addLog('info', `  - ${tool.name}: ${tool.description}`);
+              });
+
+              toast({
+                title: 'MCP Server Connected',
+                description: `Connected successfully. ${tools.length} tools available.`,
+              });
+            } else {
+              addLog('warning', 'Server responded but no tools found in response');
+              addLog('info', `Response structure: ${JSON.stringify(toolsData, null, 2)}`);
+              setIsConnected(true); // Still mark as connected even if no tools
+            }
+            return;
+          }
+        }
+        
         throw new Error(`HTTP ${initResponse.status}: ${initResponse.statusText}`);
       }
 
-      let initData;
-      const contentType = initResponse.headers.get('content-type') || '';
-      
-      if (contentType.includes('text/event-stream')) {
-        // Handle SSE response
-        addLog('info', 'Handling SSE response...');
-        const reader = initResponse.body?.getReader();
-        const decoder = new TextDecoder();
-        let sseData = '';
-        
-        if (reader) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value, { stream: true });
-            sseData += chunk;
-            
-            // Look for data lines in SSE format
-            const lines = sseData.split('\n');
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const jsonStr = line.substring(6);
-                try {
-                  initData = JSON.parse(jsonStr);
-                  addLog('info', `Parsed SSE data: ${JSON.stringify(initData)}`);
-                  break;
-                } catch (e) {
-                  addLog('warning', `Failed to parse SSE data: ${jsonStr}`);
-                }
-              }
-            }
-            if (initData) break;
-          }
-        }
-      } else {
-        // Handle JSON response
-        addLog('info', 'Handling JSON response...');
-        initData = await initResponse.json();
-      }
+      const initData = await initResponse.json();
+      addLog('info', `Initialize response: ${JSON.stringify(initData)}`);
+
       if (initData.error) {
         addLog('error', `Initialize Error: ${initData.error.message || JSON.stringify(initData.error)}`);
         throw new Error(initData.error.message || 'Initialize failed');
       }
 
       // Check if session ID was provided in response headers
-      const headerSessionId = initResponse.headers.get('Mcp-Session-Id');
+      const headerSessionId = initResponse.headers.get('x-mcp-session-id') || 
+                             initResponse.headers.get('mcp-session-id') ||
+                             initResponse.headers.get('session-id');
       addLog('info', `Header Session ID: ${headerSessionId || 'None provided'}`);
       
       // Use generated session ID if no header session ID provided
       const finalSessionId = headerSessionId || sessionId;
       
-      // Step 2: Send initialized notification
+      // Step 2: Send initialized notification (if required)
       addLog('info', 'Step 2: Sending initialized notification...');
       const notifyResponse = await fetch(
         "https://final-meta-mcp-server-production.up.railway.app/mcp",
@@ -217,8 +290,9 @@ export const MCPClient = () => {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            "Mcp-Session-Id": finalSessionId,
+            "Accept": "application/json",
+            "User-Agent": "climaty-mcp-client/1.0.0",
+            "x-mcp-client-session": finalSessionId,
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
@@ -243,8 +317,9 @@ export const MCPClient = () => {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            "Mcp-Session-Id": finalSessionId,
+            "Accept": "application/json",
+            "User-Agent": "climaty-mcp-client/1.0.0",
+            "x-mcp-client-session": finalSessionId,
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
@@ -257,7 +332,6 @@ export const MCPClient = () => {
       );
 
       addLog('info', `Tools Response Status: ${toolsResponse.status} ${toolsResponse.statusText}`);
-      addLog('info', `Tools Content-Type: ${toolsResponse.headers.get('content-type')}`);
 
       if (!toolsResponse.ok) {
         const errorText = await toolsResponse.text();
@@ -265,46 +339,9 @@ export const MCPClient = () => {
         throw new Error(`HTTP ${toolsResponse.status}: ${toolsResponse.statusText}`);
       }
 
-      let toolsData;
-      const toolsContentType = toolsResponse.headers.get('content-type') || '';
-      
-      if (toolsContentType.includes('text/event-stream')) {
-        // Handle SSE response for tools
-        addLog('info', 'Handling tools SSE response...');
-        const reader = toolsResponse.body?.getReader();
-        const decoder = new TextDecoder();
-        let sseData = '';
-        
-        if (reader) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value, { stream: true });
-            sseData += chunk;
-            
-            // Look for data lines in SSE format
-            const lines = sseData.split('\n');
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const jsonStr = line.substring(6);
-                try {
-                  toolsData = JSON.parse(jsonStr);
-                  addLog('info', `Parsed tools SSE data: ${JSON.stringify(toolsData)}`);
-                  break;
-                } catch (e) {
-                  addLog('warning', `Failed to parse tools SSE data: ${jsonStr}`);
-                }
-              }
-            }
-            if (toolsData) break;
-          }
-        }
-      } else {
-        // Handle JSON response for tools
-        addLog('info', 'Handling tools JSON response...');
-        toolsData = await toolsResponse.json();
-      }
+      const toolsData = await toolsResponse.json();
+      addLog('info', `Tools response: ${JSON.stringify(toolsData)}`);
+
       if (toolsData.error) {
         addLog('error', `Tools Error: ${toolsData.error.message || JSON.stringify(toolsData.error)}`);
         throw new Error(toolsData.error.message || 'Tools request failed');
