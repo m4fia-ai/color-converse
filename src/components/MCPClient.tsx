@@ -239,20 +239,26 @@ export const MCPClient = () => {
       
       // Step 3: Get available tools (using our generated session ID)
       addLog('info', 'Step 3: Fetching available tools (using generated session ID)...');
+      
+      const toolsHeaders = { 
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "User-Agent": "climaty-mcp-client/1.0.0",
+        // Try multiple session header formats
+        "mcp-session-id": sessionId,
+        "x-session-id": sessionId,
+        "session-id": sessionId,
+        "authorization": `Bearer ${sessionId}`,
+      };
+      
+      addLog('info', `Tools request headers: ${JSON.stringify(toolsHeaders)}`);
+      addLog('info', `Using session ID: ${sessionId}`);
+      
       const toolsResponse = await fetch(
         "https://final-meta-mcp-server-production.up.railway.app/mcp",
         {
           method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            "User-Agent": "climaty-mcp-client/1.0.0",
-            // Try multiple session header formats
-            "mcp-session-id": sessionId,
-            "x-session-id": sessionId,
-            "session-id": sessionId,
-            "authorization": `Bearer ${sessionId}`,
-          },
+          headers: toolsHeaders,
           body: JSON.stringify({
             jsonrpc: "2.0",
             id: 2,
