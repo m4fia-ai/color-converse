@@ -262,7 +262,7 @@ export const MCPClient = () => {
       addLog('info', `Using session ID: ${sessionId}`);
       
       const toolsResponse = await fetch(
-        "https://final-meta-mcp-server-production.up.railway.app/mcp",
+        `https://final-meta-mcp-server-production.up.railway.app/mcp?session=${sessionId}`,
         {
           method: "POST",
           headers: toolsHeaders,
