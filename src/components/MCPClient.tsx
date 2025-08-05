@@ -195,61 +195,47 @@ export const MCPClient = () => {
         const reader = initResponse.body?.getReader();
         const decoder = new TextDecoder();
         let sseData = '';
-        let foundInitData = false;
+        let foundSession = false;
         
         if (reader) {
-          // Set a timeout to avoid infinite waiting
-          const timeout = setTimeout(() => {
-            addLog('warning', 'SSE reading timeout - proceeding with available data');
-          }, 5000);
-          
           while (true) {
             const { done, value } = await reader.read();
-            if (done) {
-              addLog('info', 'SSE stream ended');
-              break;
-            }
+            if (done) break;
             
             const chunk = decoder.decode(value, { stream: true });
             sseData += chunk;
             addLog('info', `SSE chunk received: ${chunk}`);
             
-            // Look for events in SSE format - process line by line
+            // Parse each complete SSE event
             const lines = sseData.split('\n');
-            let eventName = '';
+            let eventName = 'message';
             
-            for (let i = 0; i < lines.length; i++) {
-              const line = lines[i];
-              
+            for (const line of lines) {
               if (line.startsWith('event: ')) {
                 eventName = line.substring(7).trim();
-                addLog('info', `Found SSE event: ${eventName}`);
-              } else if (line.startsWith('data: ')) {
+              }
+              if (line.startsWith('data: ')) {
                 const jsonStr = line.substring(6).trim();
                 if (jsonStr) {
-                  addLog('info', `Found SSE data line: ${jsonStr}`);
+                  addLog('info', `Found SSE event: ${eventName}`);
+                  
                   try {
-                    const parsed = JSON.parse(jsonStr);
-                    addLog('info', `Parsed SSE data: ${JSON.stringify(parsed)}`);
+                    const payload = JSON.parse(jsonStr);
                     
-                    // Check for session ID in various formats
-                    if (eventName === 'session' && parsed.sessionId) {
-                      serverSessionId = parsed.sessionId;
-                      addLog('info', `Server session ID from session event: ${serverSessionId}`);
-                      clearTimeout(timeout);
-                      break;
-                    } else if (parsed.sessionId) {
-                      serverSessionId = parsed.sessionId;
-                      addLog('info', `Server session ID from data: ${serverSessionId}`);
-                      clearTimeout(timeout);
-                      break;
-                    } else if ((eventName === 'message' || !eventName) && parsed.result) {
-                      // This is the initialization response
-                      if (!foundInitData) {
-                        initData = parsed;
-                        foundInitData = true;
-                        addLog('info', 'Found initialization data, continuing to look for session ID...');
-                      }
+                    // Initialize data on the first message (old behaviour)
+                    if (!initData && eventName === 'message' && payload.jsonrpc === '2.0') {
+                      initData = payload;
+                      addLog('info', `Captured init data from message event`);
+                    }
+                    
+                    // Capture session id if the server sends one
+                    if (
+                      (eventName === 'session' && payload.sessionId) ||
+                      (payload.result && payload.result.sessionId)
+                    ) {
+                      serverSessionId = payload.sessionId || payload.result.sessionId;
+                      addLog('info', `Server session id: ${serverSessionId}`);
+                      foundSession = true;
                     }
                   } catch (e) {
                     addLog('warning', `Failed to parse SSE data: ${jsonStr} - Error: ${e}`);
@@ -258,29 +244,13 @@ export const MCPClient = () => {
               }
             }
             
-            // If we have found a session ID, we can stop reading
-            if (serverSessionId) {
-              clearTimeout(timeout);
-              break;
-            }
-            
-            // Clean up processed lines to avoid reprocessing
-            if (lines.length > 1) {
-              sseData = lines[lines.length - 1]; // Keep the last incomplete line
-            }
+            if (foundSession) break; // we can stop once we have the id
           }
-          
-          clearTimeout(timeout);
         }
         
-        if (!foundInitData && !initData) {
+        if (!initData) {
           addLog('error', `Failed to parse SSE response. Full SSE data: ${sseData}`);
           throw new Error('Failed to parse SSE response - no valid initialization data found');
-        }
-        
-        // Use initData if we found it during SSE parsing
-        if (!initData && foundInitData) {
-          addLog('error', 'Found initialization data but lost reference - this should not happen');
         }
       } else {
         // Handle JSON response
