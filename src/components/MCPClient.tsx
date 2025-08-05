@@ -237,8 +237,8 @@ export const MCPClient = () => {
       // Step 2: Skip initialized notification for now (server might not require it)
       addLog('info', 'Step 2: Skipping initialized notification (server might not require it)...');
       
-      // Step 3: Get available tools (using our generated session ID)
-      addLog('info', 'Step 3: Fetching available tools (using generated session ID)...');
+      // Step 3: Get available tools (try completely stateless)
+      addLog('info', 'Step 3: Fetching available tools (completely stateless - no session)...');
       
       const toolsHeaders = { 
         "Content-Type": "application/json",
@@ -250,19 +250,15 @@ export const MCPClient = () => {
         jsonrpc: "2.0",
         id: 2,
         method: "tools/list",
-        params: {},
-        // Try including session in the body instead of headers
-        meta: {
-          sessionId: sessionId
-        }
+        params: {}
       };
       
       addLog('info', `Tools request headers: ${JSON.stringify(toolsHeaders)}`);
       addLog('info', `Tools request body: ${JSON.stringify(toolsRequestBody)}`);
-      addLog('info', `Using session ID: ${sessionId}`);
+      addLog('info', 'Attempting stateless tools request (no session ID)');
       
       const toolsResponse = await fetch(
-        `https://final-meta-mcp-server-production.up.railway.app/mcp?session=${sessionId}`,
+        "https://final-meta-mcp-server-production.up.railway.app/mcp",
         {
           method: "POST",
           headers: toolsHeaders,
