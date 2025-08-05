@@ -119,11 +119,14 @@ export const MCPClient = () => {
         "https://final-meta-mcp-server-production.up.railway.app/mcp",
        {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json" ,
+            "Accept": "application/json"
+          },
           body: JSON.stringify({
             jsonrpc: "2.0",
             id: 1,
-            method: "tools/list",   // built-in RPC
+            method: "tools.list", // built-in RPC
             params: {}
           }),
           mode: "cors",
