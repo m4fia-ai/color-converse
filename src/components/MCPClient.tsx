@@ -115,19 +115,25 @@ export const MCPClient = () => {
       //   })
       // });
       // example with the JS fetch API
+      // Generate a session ID for this connection
+      const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
       const response = await fetch(
         "https://final-meta-mcp-server-production.up.railway.app/mcp",
        {
           method: "POST",
           headers: { 
-            "Content-Type": "application/json" ,
-            "Accept":       "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "X-Session-ID": sessionId,
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
             id: 1,
-            method:  "tools/list", // built-in RPC
-            params: {}
+            method: "tools/list",
+            params: {
+              sessionId: sessionId
+            }
           }),
           mode: "cors",
        }
