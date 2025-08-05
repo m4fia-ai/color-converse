@@ -193,8 +193,8 @@ export const MCPClient = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          method: 'tools/list',
-          params: {}
+          method: 'tools/list'
+          // No params field at all
         })
       });
       
