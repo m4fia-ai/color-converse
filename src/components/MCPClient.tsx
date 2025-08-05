@@ -5,7 +5,7 @@ import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { Textarea } from './ui/textarea';
-import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench } from 'lucide-react';
+import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -24,6 +24,12 @@ interface Message {
   images?: string[];
   toolCalls?: { name: string; args: any }[];
   timestamp: Date;
+}
+
+interface ConnectionLog {
+  timestamp: Date;
+  level: 'info' | 'error' | 'warning';
+  message: string;
 }
 
 interface APIProvider {
@@ -57,10 +63,12 @@ export const MCPClient = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [mcpTools, setMcpTools] = useState<MCPTool[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionLogs, setConnectionLogs] = useState<ConnectionLog[]>([]);
   const [apiKey, setApiKey] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<APIProvider>(API_PROVIDERS[0]);
   const [selectedModel, setSelectedModel] = useState('');
   const [activeToolCall, setActiveToolCall] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -74,47 +82,102 @@ export const MCPClient = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const addLog = (level: 'info' | 'error' | 'warning', message: string) => {
+    const log: ConnectionLog = {
+      timestamp: new Date(),
+      level,
+      message
+    };
+    setConnectionLogs(prev => [...prev, log]);
+    console.log(`[MCP ${level.toUpperCase()}] ${message}`);
+  };
+
   const connectToMCPServer = async () => {
+    setIsConnecting(true);
+    setIsConnected(false);
+    setMcpTools([]);
+    
+    addLog('info', 'Attempting to connect to MCP server...');
+    addLog('info', 'Server URL: https://final-meta-mcp-server-production.up.railway.app/mcp');
+
     try {
-      // Simulate connecting to the MCP server
-      // In a real implementation, you would connect to the actual MCP server
-      setIsConnected(true);
-      
-      // Mock tools that would be available from the meta MCP server
-      const mockTools: MCPTool[] = [
-        {
-          name: 'search_web',
-          description: 'Search the web for current information'
+      // Try to connect to the actual MCP server
+      const response = await fetch('https://final-meta-mcp-server-production.up.railway.app/mcp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        {
-          name: 'read_webpage',
-          description: 'Read and extract content from a webpage'
-        },
-        {
-          name: 'get_weather',
-          description: 'Get current weather information for a location'
-        },
-        {
-          name: 'analyze_image',
-          description: 'Analyze and describe images'
-        },
-        {
-          name: 'generate_code',
-          description: 'Generate code snippets in various languages'
-        }
-      ];
-      
-      setMcpTools(mockTools);
-      toast({
-        title: 'MCP Server Connected',
-        description: `Connected successfully. ${mockTools.length} tools available.`,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/list',
+          params: {}
+        })
       });
+
+      addLog('info', `HTTP Response Status: ${response.status} ${response.statusText}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const responseText = await response.text();
+      addLog('info', `Raw response: ${responseText}`);
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        addLog('error', `Failed to parse JSON response: ${parseError}`);
+        throw new Error('Invalid JSON response from server');
+      }
+
+      if (data.error) {
+        addLog('error', `MCP Error: ${data.error.message || JSON.stringify(data.error)}`);
+        throw new Error(data.error.message || 'MCP server returned an error');
+      }
+
+      if (data.result && data.result.tools) {
+        const tools: MCPTool[] = data.result.tools.map((tool: any) => ({
+          name: tool.name,
+          description: tool.description || 'No description available',
+          inputSchema: tool.inputSchema
+        }));
+
+        setMcpTools(tools);
+        setIsConnected(true);
+        addLog('info', `Successfully connected! Found ${tools.length} tools:`);
+        tools.forEach(tool => {
+          addLog('info', `  - ${tool.name}: ${tool.description}`);
+        });
+
+        toast({
+          title: 'MCP Server Connected',
+          description: `Connected successfully. ${tools.length} tools available.`,
+        });
+      } else {
+        addLog('warning', 'Server responded but no tools found in response');
+        addLog('info', `Response structure: ${JSON.stringify(data, null, 2)}`);
+        setIsConnected(true); // Still mark as connected even if no tools
+      }
+
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      addLog('error', `Connection failed: ${errorMessage}`);
+      
+      // Try to provide more specific error information
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        addLog('error', 'Network error - possibly CORS, server down, or connection timeout');
+      }
+      
+      setIsConnected(false);
       toast({
         title: 'Connection Failed',
-        description: 'Failed to connect to MCP server.',
+        description: `Failed to connect to MCP server: ${errorMessage}`,
         variant: 'destructive'
       });
+    } finally {
+      setIsConnecting(false);
     }
   };
 
@@ -208,27 +271,83 @@ export const MCPClient = () => {
             <Bot className="w-5 h-5 text-primary-foreground" />
           </div>
           <div>
-            <h1 className="font-semibold text-card-foreground">MCP Client</h1>
+            <h1 className="font-semibold text-card-foreground">climaty</h1>
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+              <div className={`w-2 h-2 rounded-full ${isConnecting ? 'bg-yellow-500 animate-pulse' : isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
               <span className="text-sm text-muted-foreground">
-                {isConnected ? `${mcpTools.length} tools available` : 'Disconnected'}
+                {isConnecting ? 'Connecting...' : isConnected ? `${mcpTools.length} tools available` : 'Disconnected'}
               </span>
             </div>
           </div>
         </div>
         
-        <Dialog>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="sm">
-              <Settings className="w-4 h-4 mr-2" />
-              Settings
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>API Configuration</DialogTitle>
-            </DialogHeader>
+        <div className="flex items-center gap-2">
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Terminal className="w-4 h-4 mr-2" />
+                Logs
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Terminal className="w-4 h-4" />
+                  Connection Logs
+                </DialogTitle>
+              </DialogHeader>
+              <ScrollArea className="flex-1 min-h-[300px]">
+                <div className="space-y-1 font-mono text-sm">
+                  {connectionLogs.map((log, index) => (
+                    <div key={index} className={`flex gap-2 p-2 rounded text-xs ${
+                      log.level === 'error' ? 'bg-destructive/10 text-destructive' :
+                      log.level === 'warning' ? 'bg-yellow-500/10 text-yellow-600' :
+                      'bg-muted/50'
+                    }`}>
+                      <span className="text-muted-foreground">
+                        {log.timestamp.toLocaleTimeString()}
+                      </span>
+                      <span className={`font-medium ${
+                        log.level === 'error' ? 'text-destructive' :
+                        log.level === 'warning' ? 'text-yellow-600' :
+                        'text-primary'
+                      }`}>
+                        [{log.level.toUpperCase()}]
+                      </span>
+                      <span className="flex-1 break-all">{log.message}</span>
+                    </div>
+                  ))}
+                  {connectionLogs.length === 0 && (
+                    <div className="text-muted-foreground text-center py-8">
+                      No logs yet. Connection will be attempted automatically.
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </DialogContent>
+          </Dialog>
+          
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={connectToMCPServer}
+            disabled={isConnecting}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${isConnecting ? 'animate-spin' : ''}`} />
+            Reconnect
+          </Button>
+          
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Settings className="w-4 h-4 mr-2" />
+                Settings
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>API Configuration</DialogTitle>
+              </DialogHeader>
             <div className="space-y-4">
               <div>
                 <Label htmlFor="provider">Provider</Label>
@@ -280,8 +399,9 @@ export const MCPClient = () => {
                 />
               </div>
             </div>
-          </DialogContent>
-        </Dialog>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Tools Panel */}
