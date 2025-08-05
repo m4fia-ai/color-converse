@@ -237,8 +237,8 @@ export const MCPClient = () => {
       // Step 2: Skip initialized notification for now (server might not require it)
       addLog('info', 'Step 2: Skipping initialized notification (server might not require it)...');
       
-      // Step 3: Get available tools (try without session management)
-      addLog('info', 'Step 3: Fetching available tools (no session)...');
+      // Step 3: Get available tools (using our generated session ID)
+      addLog('info', 'Step 3: Fetching available tools (using generated session ID)...');
       const toolsResponse = await fetch(
         "https://final-meta-mcp-server-production.up.railway.app/mcp",
         {
@@ -247,7 +247,7 @@ export const MCPClient = () => {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "User-Agent": "climaty-mcp-client/1.0.0",
-            // Try without any session headers first
+            "mcp-session-id": sessionId, // Use our original generated session ID
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
