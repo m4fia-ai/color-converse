@@ -310,23 +310,30 @@ export const MCPClient = () => {
             
             const chunk = decoder.decode(value, { stream: true });
             sseData += chunk;
+            addLog('info', `Tools SSE chunk received: ${chunk}`);
             
             // Look for data lines in SSE format
             const lines = sseData.split('\n');
             for (const line of lines) {
               if (line.startsWith('data: ')) {
                 const jsonStr = line.substring(6);
+                addLog('info', `Found tools SSE data line: ${jsonStr}`);
                 try {
                   toolsData = JSON.parse(jsonStr);
                   addLog('info', `Parsed tools SSE data: ${JSON.stringify(toolsData)}`);
                   break;
                 } catch (e) {
-                  addLog('warning', `Failed to parse tools SSE data: ${jsonStr}`);
+                  addLog('warning', `Failed to parse tools SSE data: ${jsonStr} - Error: ${e}`);
                 }
               }
             }
             if (toolsData) break;
           }
+        }
+        
+        if (!toolsData) {
+          addLog('error', `Failed to parse tools SSE response. Full SSE data: ${sseData}`);
+          throw new Error('Failed to parse tools SSE response - no valid data found');
         }
       } else {
         // Handle JSON response for tools
@@ -586,7 +593,7 @@ export const MCPClient = () => {
                   Connection Logs
                 </DialogTitle>
               </DialogHeader>
-              <ScrollArea className="flex-1 min-h-[300px]">
+              <ScrollArea className="flex-1 min-h-[300px] max-h-[400px]">
                 <div className="space-y-1 font-mono text-sm">
                   {connectionLogs.map((log, index) => (
                     <div key={index} className={`flex gap-2 p-2 rounded text-xs ${
