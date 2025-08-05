@@ -183,28 +183,40 @@ export const MCPClient = () => {
             
             const chunk = decoder.decode(value, { stream: true });
             sseData += chunk;
+            addLog('info', `SSE chunk received: ${chunk}`);
             
             // Look for data lines in SSE format
             const lines = sseData.split('\n');
             for (const line of lines) {
               if (line.startsWith('data: ')) {
                 const jsonStr = line.substring(6);
+                addLog('info', `Found SSE data line: ${jsonStr}`);
                 try {
                   initData = JSON.parse(jsonStr);
                   addLog('info', `Parsed SSE data: ${JSON.stringify(initData)}`);
                   break;
                 } catch (e) {
-                  addLog('warning', `Failed to parse SSE data: ${jsonStr}`);
+                  addLog('warning', `Failed to parse SSE data: ${jsonStr} - Error: ${e}`);
                 }
               }
             }
             if (initData) break;
           }
         }
+        
+        if (!initData) {
+          addLog('error', `Failed to parse SSE response. Full SSE data: ${sseData}`);
+          throw new Error('Failed to parse SSE response - no valid data found');
+        }
       } else {
         // Handle JSON response
         addLog('info', 'Handling JSON response...');
         initData = await initResponse.json();
+      }
+
+      if (!initData) {
+        addLog('error', 'No initialization data received');
+        throw new Error('No initialization data received from server');
       }
 
       addLog('info', `Initialize response: ${JSON.stringify(initData)}`);
