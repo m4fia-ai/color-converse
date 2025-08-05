@@ -198,9 +198,16 @@ export const MCPClient = () => {
         let foundSession = false;
         
         if (reader) {
+          // Set a timeout to continue reading for session ID after getting init data
+          const timeoutMs = 2000; // Wait up to 2 seconds for session ID
+          const startTime = Date.now();
+          
           while (true) {
             const { done, value } = await reader.read();
-            if (done) break;
+            if (done) {
+              addLog('info', 'SSE stream ended');
+              break;
+            }
             
             const chunk = decoder.decode(value, { stream: true });
             sseData += chunk;
@@ -213,11 +220,12 @@ export const MCPClient = () => {
             for (const line of lines) {
               if (line.startsWith('event: ')) {
                 eventName = line.substring(7).trim();
+                addLog('info', `Processing SSE event: ${eventName}`);
               }
               if (line.startsWith('data: ')) {
                 const jsonStr = line.substring(6).trim();
                 if (jsonStr) {
-                  addLog('info', `Found SSE event: ${eventName}`);
+                  addLog('info', `Found SSE event: ${eventName}, data: ${jsonStr}`);
                   
                   try {
                     const payload = JSON.parse(jsonStr);
@@ -231,11 +239,13 @@ export const MCPClient = () => {
                     // Capture session id if the server sends one
                     if (
                       (eventName === 'session' && payload.sessionId) ||
-                      (payload.result && payload.result.sessionId)
+                      (payload.result && payload.result.sessionId) ||
+                      (payload.sessionId)
                     ) {
                       serverSessionId = payload.sessionId || payload.result.sessionId;
                       addLog('info', `Server session id: ${serverSessionId}`);
                       foundSession = true;
+                      break;
                     }
                   } catch (e) {
                     addLog('warning', `Failed to parse SSE data: ${jsonStr} - Error: ${e}`);
@@ -244,7 +254,21 @@ export const MCPClient = () => {
               }
             }
             
-            if (foundSession) break; // we can stop once we have the id
+            // If we found the session ID, break immediately
+            if (foundSession) {
+              addLog('info', 'Found session ID, stopping SSE reading');
+              break;
+            }
+            
+            // If we have init data but no session ID yet, continue reading for a limited time
+            if (initData && !foundSession) {
+              const elapsed = Date.now() - startTime;
+              if (elapsed > timeoutMs) {
+                addLog('warning', `Timeout waiting for session ID after ${elapsed}ms, proceeding without it`);
+                break;
+              }
+              addLog('info', `Waiting for session ID... (${elapsed}ms elapsed)`);
+            }
           }
         }
         
