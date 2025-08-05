@@ -175,6 +175,7 @@ export const MCPClient = () => {
           title: 'MCP Server Connected',
           description: `Connected successfully. ${tools.length} tools available.`,
         });
+      }
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
