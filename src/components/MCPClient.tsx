@@ -102,18 +102,27 @@ export const MCPClient = () => {
 
     try {
       // Try to connect to the actual MCP server
-      const response = await fetch('https://final-meta-mcp-server-production.up.railway.app/mcp', {
-        method: 'POST',
+      // const response = await fetch('https://final-meta-mcp-server-production.up.railway.app/mcp', {
+      //   method: 'POST',
+      //   headers: {
+      //     'Content-Type': 'application/json',
+      //   },
+      //   body: JSON.stringify({
+      //     jsonrpc: '2.0',
+      //     id: 1,
+      //     method: 'tools/list',
+      //     params: {}
+      //   })
+      // });
+      // example with the JS fetch API
+      const response = await fetch("https://final-meta-mcp-server-production.up.railway.app/mcp", {
+        method: "GET",                  // SSE is always GET
         headers: {
-          'Content-Type': 'application/json',
+          "Accept": "text/event-stream" // ← critical
         },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'tools/list',
-          params: {}
-        })
+        mode: "cors",                   // your CORSMiddleware already allows it
       });
+
 
       addLog('info', `HTTP Response Status: ${response.status} ${response.statusText}`);
 
