@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { getManifest } from '@/lib/mcp';
 
 interface MCPTool {
   name: string;
@@ -141,20 +142,11 @@ export const MCPClient = () => {
     return data;
   };
 
-  const getManifest = async (url: string) => {
-    const response = await fetch(url, {
-      headers: { Accept: 'application/json' },
-      mode: 'cors'
-    });
-    const manifest = await response.json();
-    return manifest;
-  };
-
   const openEventStream = async (url: string) => {
     try {
       const resp = await fetch(url, {
-        headers: { Accept: 'text/event-stream' },
-        mode: 'cors'
+        mode: "cors",
+        headers: { Accept: "text/event-stream" }
       });
       
       if (!resp.body) {
@@ -179,7 +171,7 @@ export const MCPClient = () => {
             const evt = JSON.parse(line);
             if (evt.type === 'manifest') {
               setMcpTools(evt.data.tools || []);
-              addLog('info', `Received manifest with ${evt.data.tools?.length || 0} tools via SSE`);
+              addLog('info', `Received manifest update with ${evt.data.tools?.length || 0} tools via SSE`);
             } else {
               // Route other events (tool responses, etc.)
               addLog('info', `Received SSE event: ${evt.type}`);
@@ -200,19 +192,19 @@ export const MCPClient = () => {
     setMcpTools([]);
     setConnectionLogs([]);
     
-    addLog('info', 'Starting MCP connection with SSE streaming...');
+    addLog('info', 'Starting MCP connection with instant manifest + SSE...');
     addLog('info', `Target server: ${serverUrl}`);
 
     try {
-      // Get initial manifest
-      addLog('info', 'Fetching initial manifest...');
+      // Step 1: Get initial manifest (instant tools list)
+      addLog('info', 'Fetching instant manifest...');
       const manifest = await getManifest(serverUrl);
       if (manifest.tools) {
         setMcpTools(manifest.tools);
-        addLog('info', `Loaded ${manifest.tools.length} tools from manifest: ${manifest.tools.map((t: MCPTool) => t.name).join(', ')}`);
+        addLog('info', `✅ Loaded ${manifest.tools.length} tools from manifest: ${manifest.tools.map((t: MCPTool) => t.name).join(', ')}`);
       }
       
-      // Open event stream for real-time updates
+      // Step 2: Open event stream for real-time updates (keeps connection alive)
       addLog('info', 'Opening SSE stream for real-time updates...');
       openEventStream(serverUrl);
       
@@ -221,7 +213,7 @@ export const MCPClient = () => {
       
       toast({
         title: 'MCP Server Connected',
-        description: `Connected with ${mcpTools.length} tools available.`,
+        description: `Connected with ${manifest.tools?.length || 0} tools available.`,
       });
 
     } catch (error) {
