@@ -105,22 +105,59 @@ export const MCPClient = () => {
     console.log(`[MCP ${level.toUpperCase()}] ${message}`);
   };
 
+  const sendMCPRequest = async (method: string, params?: any) => {
+    const requestBody: any = { method };
+    
+    // Only add params if they are provided and not empty
+    // This follows LibreChat's pattern of conditional parameter inclusion
+    if (params !== undefined && params !== null) {
+      if (typeof params === 'object' && Object.keys(params).length > 0) {
+        requestBody.params = params;
+      } else if (typeof params !== 'object') {
+        requestBody.params = params;
+      }
+    }
+    
+    addLog('info', `Sending MCP request: ${method} ${params ? `with params: ${JSON.stringify(params)}` : 'without params'}`);
+    
+    const response = await fetch('/api/mcp-proxy/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`MCP request failed (${response.status}): ${errorText}`);
+    }
+    
+    const data = await response.json();
+    addLog('info', `MCP response for ${method}: ${JSON.stringify(data)}`);
+    
+    if (data.error) {
+      throw new Error(`MCP ${method} error (${data.error.code}): ${data.error.message}${data.error.data ? ` - ${data.error.data}` : ''}`);
+    }
+    
+    return data;
+  };
+
   const connectToMCPServer = async () => {
     setIsConnecting(true);
     setIsConnected(false);
     setMcpTools([]);
+    setConnectionLogs([]);
     
     addLog('info', 'Starting MCP connection using mcp-remote bridge...');
     addLog('info', `Target server: ${serverUrl}`);
 
     try {
-      // Start the MCP remote proxy
+      // Start the MCP remote proxy - following LibreChat's configuration pattern
       const proxyConfig = {
         remoteUrl: serverUrl,
         transport: 'http-only' as const
       };
       
-      addLog('info', 'Starting mcp-remote proxy...');
+      addLog('info', 'Starting mcp-remote proxy with LibreChat-style configuration...');
       const startResponse = await fetch('/api/mcp-proxy/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -134,104 +171,73 @@ export const MCPClient = () => {
       
       addLog('info', 'mcp-remote proxy started successfully');
       
-      // Step 1: Initialize connection through proxy
-      addLog('info', 'Step 1: Initializing connection...');
-      const initResponse = await fetch('/api/mcp-proxy/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          method: 'initialize',
-          params: {
-            protocolVersion: '2025-06-18',
-            capabilities: {
-              roots: { listChanged: true },
-              sampling: {}
-            },
-            clientInfo: {
-              name: 'climaty',
-              version: '1.0.0'
-            }
-          }
-        })
+      // Wait for proxy to be fully ready
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Step 1: Initialize connection - following MCP protocol spec exactly
+      addLog('info', 'Step 1: Initializing MCP connection...');
+      const initData = await sendMCPRequest('initialize', {
+        protocolVersion: '2025-06-18',
+        capabilities: {
+          roots: { listChanged: true },
+          sampling: {}
+        },
+        clientInfo: {
+          name: 'climaty',
+          version: '1.0.0'
+        }
       });
       
-      if (!initResponse.ok) {
-        throw new Error(`Initialize failed: ${initResponse.status} ${initResponse.statusText}`);
-      }
+      addLog('info', `Server info: ${initData.result?.serverInfo?.name || 'Unknown'} v${initData.result?.serverInfo?.version || 'Unknown'}`);
+      addLog('info', `Protocol version: ${initData.result?.protocolVersion || 'Unknown'}`);
       
-      const initData = await initResponse.json();
-      addLog('info', `Initialize response: ${JSON.stringify(initData)}`);
-      
-      if (initData.error) {
-        throw new Error(`Initialize error: ${initData.error.message || initData.error.code}`);
-      }
-      
-      // Step 2: Send initialized notification
+      // Step 2: Send initialized notification - required by MCP spec
       addLog('info', 'Step 2: Sending initialized notification...');
       try {
-        const notifyResponse = await fetch('/api/mcp-proxy/request', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            method: 'initialized',
-            params: {}
-          })
-        });
-        
-        if (notifyResponse.ok) {
-          addLog('info', 'Initialized notification sent successfully');
-        } else {
-          addLog('warning', 'Initialized notification failed - continuing anyway');
-        }
+        await sendMCPRequest('initialized');
+        addLog('info', 'Initialized notification sent successfully');
       } catch (notifyError) {
-        addLog('warning', `Initialized notification error: ${notifyError} - continuing anyway`);
+        addLog('warning', `Initialized notification failed: ${notifyError} - continuing anyway`);
       }
       
-      // Step 3: Get available tools
+      // Step 3: Get available tools - LibreChat pattern with no params for list operations
       addLog('info', 'Step 3: Fetching available tools...');
-      const toolsResponse = await fetch('/api/mcp-proxy/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          method: 'tools/list'
-          // No params field at all
-        })
-      });
-      
-      if (!toolsResponse.ok) {
-        throw new Error(`Tools request failed: ${toolsResponse.status} ${toolsResponse.statusText}`);
-      }
-      
-      const toolsData = await toolsResponse.json();
-      addLog('info', `Tools response: ${JSON.stringify(toolsData)}`);
-      
-      if (toolsData.error) {
-        throw new Error(`Tools error: ${toolsData.error.message || toolsData.error.code}`);
-      }
-
-      if (toolsData.result?.tools) {
-        setMcpTools(toolsData.result.tools);
-        addLog('info', `Successfully loaded ${toolsData.result.tools.length} tools`);
-      } else {
-        addLog('warning', 'No tools found in response');
+      try {
+        const toolsData = await sendMCPRequest('tools/list');
+        
+        if (toolsData.result?.tools && Array.isArray(toolsData.result.tools)) {
+          setMcpTools(toolsData.result.tools);
+          addLog('info', `Successfully loaded ${toolsData.result.tools.length} tools: ${toolsData.result.tools.map((t: MCPTool) => t.name).join(', ')}`);
+        } else {
+          addLog('warning', 'No tools found in server response');
+          setMcpTools([]);
+        }
+      } catch (toolsError) {
+        addLog('warning', `Tools list failed: ${toolsError} - server may not support tools`);
         setMcpTools([]);
       }
       
+      // Step 4: Try to get prompts if available
+      try {
+        const promptsData = await sendMCPRequest('prompts/list');
+        if (promptsData.result?.prompts) {
+          addLog('info', `Server also provides ${promptsData.result.prompts.length} prompts`);
+        }
+      } catch (promptsError) {
+        addLog('info', 'Server does not provide prompts (this is normal)');
+      }
+      
       setIsConnected(true);
-      addLog('info', 'Connection successful via mcp-remote bridge!');
+      addLog('info', '✅ MCP connection established successfully!');
       
       toast({
         title: 'MCP Server Connected',
-        description: `Connected successfully via mcp-remote bridge.`,
+        description: `Connected to ${initData.result?.serverInfo?.name || 'MCP server'} with ${mcpTools.length} tools available.`,
       });
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      addLog('error', `Connection failed: ${errorMessage}`);
-      
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        addLog('error', 'Network error - possibly CORS, server down, or connection timeout');
-      }
+      addLog('error', `❌ Connection failed: ${errorMessage}`);
       
       setIsConnected(false);
       toast({
