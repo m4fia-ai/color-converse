@@ -568,7 +568,7 @@ export const MCPClient = () => {
                 </div>
                 
                 {msg.role === 'user' && (
-                  <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-[#D2F245] flex items-center justify-center flex-shrink-0">
                     <User className="w-4 h-4 text-secondary-foreground" />
                   </div>
                 )}
