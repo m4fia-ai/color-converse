@@ -628,7 +628,7 @@ export const MCPClient = () => {
                 variant="outline"
                 size="sm"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex-shrink-0 border-primary text-primary hover:bg-primary/10"
+                className="flex-shrink-0 border-primary text-primary"
               >
                 <Paperclip className="w-4 h-4" />
               </Button>
