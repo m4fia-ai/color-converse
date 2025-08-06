@@ -472,7 +472,7 @@ export const MCPClient = () => {
     try {
       setIsLoading(true);
       
-      // Get all messages up to the current point
+      // Get the conversation context
       const currentMessages = [...messages];
       const lastUserMessage = currentMessages.filter(m => m.role === 'user').pop();
       
@@ -483,7 +483,16 @@ export const MCPClient = () => {
         return;
       }
 
-      // Prepare follow-up request with tool results
+      // Find the assistant message with tool calls
+      const assistantMessageWithTools = currentMessages.find(m => 
+        m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0
+      );
+
+      if (!assistantMessageWithTools) {
+        console.log('[Follow-up] No assistant message with tools found');
+        return;
+      }
+
       let requestBody: any;
       let headers: any = {
         'Content-Type': 'application/json',
@@ -491,68 +500,72 @@ export const MCPClient = () => {
       };
 
       if (selectedProvider.name === 'OpenAI') {
-        // Build conversation with tool calls and results
+        // OpenAI pattern: user -> assistant with tool_calls -> tool messages -> assistant response
         const conversationMessages = [
-          { role: 'user', content: lastUserMessage.content }
+          { role: 'user', content: lastUserMessage.content },
+          {
+            role: 'assistant',
+            content: assistantMessageWithTools.content || '',
+            tool_calls: toolResults.map(result => ({
+              id: result.tool_call_id,
+              type: 'function',
+              function: {
+                name: result.tool_name,
+                arguments: JSON.stringify(result.args)
+              }
+            }))
+          }
         ];
 
-        // Add the assistant message with tool calls
-        const toolCallsForAPI = toolResults.map((result, idx) => ({
-          id: result.tool_call_id,
-          type: 'function',
-          function: {
-            name: result.tool_name || `tool_${idx}`,
-            arguments: JSON.stringify(result.args || {})
-          }
-        }));
-
-        conversationMessages.push({
-          role: 'assistant' as const,
-          content: '',
-          tool_calls: toolCallsForAPI
-        } as any);
-
-        // Add tool results
+        // Add tool result messages
         toolResults.forEach(result => {
-          conversationMessages.push({
-            role: 'tool' as const,
+          (conversationMessages as any[]).push({
+            role: 'tool',
             tool_call_id: result.tool_call_id,
             content: Array.isArray(result.output) 
               ? result.output.map(item => item.type === 'text' ? item.text : JSON.stringify(item)).join('\n')
               : typeof result.output === 'object' 
                 ? JSON.stringify(result.output, null, 2)
                 : result.output?.toString() || ''
-          } as any);
+          });
         });
 
         requestBody = {
           model: selectedModel,
           messages: conversationMessages,
           max_tokens: 1000
+          // Note: Don't include tools here for the follow-up call
         };
+
       } else if (selectedProvider.name === 'Anthropic') {
+        // Anthropic pattern: user -> assistant with tool_use -> user with tool results -> assistant response
         headers['x-api-key'] = apiKey;
         headers['anthropic-version'] = '2023-06-01';
         delete headers['Authorization'];
 
-        // Format tool results for Anthropic
-        const toolResultsText = toolResults.map(result => {
-          const output = Array.isArray(result.output) 
+        const conversationMessages = [
+          { role: 'user', content: lastUserMessage.content }
+        ];
+
+        // Add tool results as user messages (Anthropic pattern)
+        toolResults.forEach(result => {
+          const toolResultContent = Array.isArray(result.output) 
             ? result.output.map(item => item.type === 'text' ? item.text : JSON.stringify(item, null, 2)).join('\n')
             : typeof result.output === 'object' 
               ? JSON.stringify(result.output, null, 2)
               : result.output?.toString() || '';
-          
-          return `Tool: ${result.tool_name || 'Unknown'}\nResult:\n${output}`;
-        }).join('\n\n');
+
+          conversationMessages.push({
+            role: 'user',
+            content: `Tool "${result.tool_name}" result:\n${toolResultContent}`
+          });
+        });
 
         requestBody = {
           model: selectedModel,
           max_tokens: 1000,
-          messages: [
-            { role: 'user', content: lastUserMessage.content },
-            { role: 'user', content: `Here are the results from the tools I used:\n\n${toolResultsText}\n\nPlease analyze these results and provide a comprehensive response.` }
-          ]
+          messages: conversationMessages
+          // Note: Don't include tools here for the follow-up call
         };
       }
 
@@ -568,7 +581,9 @@ export const MCPClient = () => {
       console.log('[Follow-up] API response status:', response.status);
       
       if (!response.ok) {
-        throw new Error(`API error: ${response.status} ${response.statusText}`);
+        const errorText = await response.text();
+        console.error('[Follow-up] API error response:', errorText);
+        throw new Error(`API error: ${response.status} ${response.statusText} - ${errorText}`);
       }
 
       const data = await response.json();
@@ -584,16 +599,22 @@ export const MCPClient = () => {
 
       console.log('[Follow-up] Extracted content:', content);
       
-      // Add the follow-up response as a new message
-      const followUpMessage: Message = {
-        id: (Date.now() + Math.random()).toString(),
-        role: 'assistant',
-        content,
-        timestamp: new Date()
-      };
+      if (content && content.trim()) {
+        // Add the follow-up response as a new message
+        const followUpMessage: Message = {
+          id: (Date.now() + Math.random()).toString(),
+          role: 'assistant',
+          content,
+          timestamp: new Date()
+        };
 
-      console.log('[Follow-up] Adding follow-up message:', followUpMessage);
-      setMessages(prev => [...prev, followUpMessage]);
+        console.log('[Follow-up] Adding follow-up message:', followUpMessage);
+        setMessages(prev => [...prev, followUpMessage]);
+        
+        addLog('info', '✅ Generated follow-up response based on tool results');
+      } else {
+        addLog('warning', '⚠️ Empty follow-up response received');
+      }
       
     } catch (error) {
       console.error('[Follow-up] Error:', error);
