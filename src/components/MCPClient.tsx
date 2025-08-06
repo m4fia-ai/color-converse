@@ -401,7 +401,7 @@ export const MCPClient = () => {
           {mcpTools.length > 0 && (
             <Dialog>
               <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="border-primary text-primary hover:bg-primary/10">
+                <Button variant="outline" size="sm" className="border-primary text-primary">
                   <Wrench className="w-4 h-4 mr-2" />
                   Tools ({mcpTools.length})
                 </Button>
@@ -429,7 +429,7 @@ export const MCPClient = () => {
           {/* Settings */}
           <Dialog>
             <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="border-primary text-primary hover:color-white">
+              <Button variant="outline" size="sm" className="border-primary text-primary">
                 <Settings className="w-4 h-4" />
               </Button>
             </DialogTrigger>
