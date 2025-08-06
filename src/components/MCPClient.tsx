@@ -594,7 +594,7 @@ export const MCPClient = () => {
         </ScrollArea>
 
         {/* Input Area */}
-        <div className="border-t border-primary bg-card p-4">
+        <div className="border-t border-primary bg-[#001000] p-4">
           <div className="max-w-4xl mx-auto">
             {selectedImages.length > 0 && (
               <div className="flex gap-2 mb-3 overflow-x-auto">
