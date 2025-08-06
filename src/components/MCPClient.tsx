@@ -429,7 +429,7 @@ export const MCPClient = () => {
           {/* Settings */}
           <Dialog>
             <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="border-primary text-primary hover:bg-primary/10">
+              <Button variant="outline" size="sm" className="border-primary text-primary hover:color-white">
                 <Settings className="w-4 h-4" />
               </Button>
             </DialogTrigger>
