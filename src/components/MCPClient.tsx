@@ -464,6 +464,8 @@ export const MCPClient = () => {
         // Store result for follow-up response
         toolResults.push({
           tool_call_id: toolCall.id,
+          tool_name: toolCall.name,
+          args: toolCall.args,
           output: result.content
         });
 
@@ -489,6 +491,8 @@ export const MCPClient = () => {
         // Store error for follow-up response
         toolResults.push({
           tool_call_id: toolCall.id,
+          tool_name: toolCall.name,
+          args: toolCall.args,
           output: `Error: ${errorMessage}`
         });
 
@@ -506,11 +510,11 @@ export const MCPClient = () => {
     try {
       setIsLoading(true);
       
-      // Get the original message and all previous messages for context
-      const allMessages = messages;
-      const userMessage = allMessages.find(m => m.role === 'user');
+      // Get all messages up to the current point
+      const currentMessages = [...messages];
+      const lastUserMessage = currentMessages.filter(m => m.role === 'user').pop();
       
-      if (!userMessage) return;
+      if (!lastUserMessage) return;
 
       // Prepare follow-up request with tool results
       let requestBody: any;
@@ -520,20 +524,39 @@ export const MCPClient = () => {
       };
 
       if (selectedProvider.name === 'OpenAI') {
-        // For OpenAI, add tool results as tool messages
+        // Build conversation with tool calls and results
         const conversationMessages = [
-          { role: 'user', content: userMessage.content },
-          { role: 'assistant', content: '', tool_calls: toolResults.map(tr => ({
-            id: tr.tool_call_id,
-            type: 'function',
-            function: { name: '', arguments: '{}' }
-          })) },
-          ...toolResults.map(result => ({
-            role: 'tool',
-            tool_call_id: result.tool_call_id,
-            content: typeof result.output === 'object' ? JSON.stringify(result.output) : result.output?.toString() || ''
-          }))
+          { role: 'user', content: lastUserMessage.content }
         ];
+
+        // Add the assistant message with tool calls
+        const toolCallsForAPI = toolResults.map((result, idx) => ({
+          id: result.tool_call_id,
+          type: 'function',
+          function: {
+            name: result.tool_name || `tool_${idx}`,
+            arguments: JSON.stringify(result.args || {})
+          }
+        }));
+
+        conversationMessages.push({
+          role: 'assistant' as const,
+          content: '',
+          tool_calls: toolCallsForAPI
+        } as any);
+
+        // Add tool results
+        toolResults.forEach(result => {
+          conversationMessages.push({
+            role: 'tool' as const,
+            tool_call_id: result.tool_call_id,
+            content: Array.isArray(result.output) 
+              ? result.output.map(item => item.type === 'text' ? item.text : JSON.stringify(item)).join('\n')
+              : typeof result.output === 'object' 
+                ? JSON.stringify(result.output, null, 2)
+                : result.output?.toString() || ''
+          } as any);
+        });
 
         requestBody = {
           model: selectedModel,
@@ -545,17 +568,23 @@ export const MCPClient = () => {
         headers['anthropic-version'] = '2023-06-01';
         delete headers['Authorization'];
 
-        // For Anthropic, add tool results as user messages
-        const toolResultsText = toolResults.map(result => 
-          `Tool ${result.tool_call_id} result: ${typeof result.output === 'object' ? JSON.stringify(result.output, null, 2) : result.output}`
-        ).join('\n\n');
+        // Format tool results for Anthropic
+        const toolResultsText = toolResults.map(result => {
+          const output = Array.isArray(result.output) 
+            ? result.output.map(item => item.type === 'text' ? item.text : JSON.stringify(item, null, 2)).join('\n')
+            : typeof result.output === 'object' 
+              ? JSON.stringify(result.output, null, 2)
+              : result.output?.toString() || '';
+          
+          return `Tool: ${result.tool_name || 'Unknown'}\nResult:\n${output}`;
+        }).join('\n\n');
 
         requestBody = {
           model: selectedModel,
           max_tokens: 1000,
           messages: [
-            { role: 'user', content: userMessage.content },
-            { role: 'user', content: `Based on these tool results, please provide a comprehensive response:\n\n${toolResultsText}` }
+            { role: 'user', content: lastUserMessage.content },
+            { role: 'user', content: `Here are the results from the tools I used:\n\n${toolResultsText}\n\nPlease analyze these results and provide a comprehensive response.` }
           ]
         };
       }
@@ -1011,10 +1040,6 @@ const ToolCallsDisplayComponent = ({ toolCalls }: { toolCalls: ToolCall[] }) => 
                         {toolCall.status === 'error' && <FileText className="w-3 h-3 mr-1" />}
                         {toolCall.name}
                       </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {toolCall.status === 'pending' ? 'Running...' :
-                         toolCall.status === 'success' ? 'Completed' : 'Failed'}
-                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       {toolCall.result && (
@@ -1047,17 +1072,17 @@ const ToolCallsDisplayComponent = ({ toolCalls }: { toolCalls: ToolCall[] }) => 
                       <div className="text-xs font-medium text-muted-foreground mb-2">Result:</div>
                       <div className="bg-background/60 p-3 rounded border">
                         {Array.isArray(toolCall.result) ? (
-                          <div className="space-y-3">
+                          <div className="space-y-2">
                             {toolCall.result.map((item: any, idx: number) => (
-                              <div key={idx} className="border-l-2 border-primary/30 pl-3">
+                              <div key={idx}>
                                 {item.type === 'text' ? (
                                   <div className="prose prose-sm max-w-none dark:prose-invert">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    <pre className="whitespace-pre-wrap font-mono text-sm bg-muted/20 p-2 rounded border overflow-x-auto">
                                       {item.text}
-                                    </ReactMarkdown>
+                                    </pre>
                                   </div>
                                 ) : (
-                                  <pre className="text-sm whitespace-pre-wrap overflow-x-auto bg-muted/30 p-2 rounded">
+                                  <pre className="text-sm whitespace-pre-wrap overflow-x-auto bg-muted/30 p-2 rounded font-mono">
                                     {typeof item === 'object' ? JSON.stringify(item, null, 2) : item}
                                   </pre>
                                 )}
@@ -1065,15 +1090,13 @@ const ToolCallsDisplayComponent = ({ toolCalls }: { toolCalls: ToolCall[] }) => 
                             ))}
                           </div>
                         ) : typeof toolCall.result === 'object' ? (
-                          <pre className="text-sm whitespace-pre-wrap overflow-x-auto">
+                          <pre className="text-sm whitespace-pre-wrap overflow-x-auto font-mono">
                             {JSON.stringify(toolCall.result, null, 2)}
                           </pre>
                         ) : (
-                          <div className="prose prose-sm max-w-none dark:prose-invert">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {toolCall.result.toString()}
-                            </ReactMarkdown>
-                          </div>
+                          <pre className="text-sm whitespace-pre-wrap overflow-x-auto font-mono bg-muted/20 p-2 rounded border">
+                            {toolCall.result.toString()}
+                          </pre>
                         )}
                       </div>
                     </div>
