@@ -499,7 +499,7 @@ export const MCPClient = () => {
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden bg-[#001000]">
         <ScrollArea className="flex-1 p-4">
           <div className="max-w-4xl mx-auto space-y-4">
             {messages.length === 0 && (
