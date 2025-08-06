@@ -597,7 +597,7 @@ export const MCPClient = () => {
                       <div className="mt-3 space-y-2">
                         {msg.toolCalls.map((tc) => (
                           <Collapsible key={tc.id}>
-                            <CollapsibleTrigger className="flex items-center gap-2 w-full text-left p-2 rounded bg-muted hover:bg-muted/80">
+                            <CollapsibleTrigger className="flex items-center gap-2 w-full text-left p-2 rounded bg-transparent">
                               <div className={`w-2 h-2 rounded-full ${
                                 tc.status === 'success' ? 'bg-green-500' :
                                 tc.status === 'error' ? 'bg-red-500' : 'bg-yellow-500'
