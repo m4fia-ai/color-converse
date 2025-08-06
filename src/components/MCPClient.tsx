@@ -374,7 +374,7 @@ export const MCPClient = () => {
   const connectionStatus = getConnectionStatus();
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <div className="flex flex-col h-screen bg-black">
       {/* Header */}
        <div className="flex items-center justify-between p-4 border-b border-primary bg-card">
         <div className="flex items-center gap-4">
