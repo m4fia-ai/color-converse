@@ -93,7 +93,7 @@ export const MCPClient = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
-  const [serverUrl] = useState('https://final-meta-mcp-server-production.up.railway.app/mcp');
+  const [serverUrl] = useState('https://redis-hosted-mcp-server-production.up.railway.app/mcp');
 
   /** Provider‑formatted conversation history (kept outside React state so we
    *   can mutate synchronously without rerenders). Each element is already in
