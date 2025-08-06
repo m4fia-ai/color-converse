@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { connectMCP } from '@/lib/mcp';
+import { MCPClientManager } from '@/lib/mcpClient';
 
 interface MCPTool {
   name: string;
@@ -72,6 +72,7 @@ export const MCPClient = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [serverUrl] = useState('https://final-meta-mcp-server-production.up.railway.app/mcp');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mcpClientRef = useRef<MCPClientManager>(new MCPClientManager());
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -154,38 +155,41 @@ export const MCPClient = () => {
     setMcpTools([]);
     setConnectionLogs([]);
     
-    addLog('info', 'Starting MCP connection by reading manifest from stream...');
+    addLog('info', 'Starting MCP connection using official SDK...');
     addLog('info', `Target server: ${serverUrl}`);
 
     try {
-      // Use the smart streamer that reads manifest from first line
-      addLog('info', 'Opening MCP stream to read manifest...');
+      // Disconnect existing connection if any
+      if (mcpClientRef.current.isConnected()) {
+        await mcpClientRef.current.disconnect();
+      }
+
+      addLog('info', 'Connecting to MCP server...');
       
-      await connectMCP(
+      await mcpClientRef.current.connect(
         serverUrl,
         (manifest) => {
-          // This fires when we get the first manifest frame
+          // This fires when we get the manifest with tools
           setMcpTools(manifest.tools || []);
           addLog('info', `✅ Got manifest with ${manifest.tools?.length || 0} tools: ${manifest.tools?.map((t: MCPTool) => t.name).join(', ') || 'none'}`);
           setIsConnected(true);
-          setIsConnecting(false);  // Set this here when we actually get the manifest
+          setIsConnecting(false);
           
           toast({
             title: 'MCP Server Connected',
             description: `Connected with ${manifest.tools?.length || 0} tools available.`,
           });
-        },
-        handleMCPEvent  // Handle subsequent events
+        }
       );
       
-      addLog('info', '✅ MCP stream connection established!');
+      addLog('info', '✅ MCP connection established using official SDK!');
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       addLog('error', `❌ Connection failed: ${errorMessage}`);
       
       setIsConnected(false);
-      setIsConnecting(false);  // Make sure to clear connecting state on error
+      setIsConnecting(false);
       toast({
         title: 'Connection Failed',
         description: `Failed to connect to MCP server: ${errorMessage}`,
