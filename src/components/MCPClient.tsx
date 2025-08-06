@@ -5,12 +5,14 @@ import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { Textarea } from './ui/textarea';
-import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw } from 'lucide-react';
+import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw, Play, FileText } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { MCPClientManager } from '@/lib/mcpClient';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface MCPTool {
   name: string;
@@ -18,12 +20,21 @@ interface MCPTool {
   inputSchema?: any;
 }
 
+interface ToolCall {
+  id: string;
+  name: string;
+  args: any;
+  result?: any;
+  error?: string;
+  status: 'pending' | 'success' | 'error';
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   images?: string[];
-  toolCalls?: { name: string; args: any }[];
+  toolCalls?: ToolCall[];
   timestamp: Date;
 }
 
@@ -316,6 +327,27 @@ export const MCPClient = () => {
         return;
       }
 
+      // Add MCP tools to the request if available and connected
+      if (isConnected && mcpTools.length > 0) {
+        if (selectedProvider.name === 'OpenAI') {
+          requestBody.tools = mcpTools.map(tool => ({
+            type: 'function',
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.inputSchema || {}
+            }
+          }));
+          requestBody.tool_choice = 'auto';
+        } else if (selectedProvider.name === 'Anthropic') {
+          requestBody.tools = mcpTools.map(tool => ({
+            name: tool.name,
+            description: tool.description,
+            input_schema: tool.inputSchema || {}
+          }));
+        }
+      }
+
       // For OpenAI and Anthropic
       const response = await fetch(selectedProvider.baseUrl + (selectedProvider.name === 'Anthropic' ? '/messages' : '/chat/completions'), {
         method: 'POST',
@@ -328,24 +360,10 @@ export const MCPClient = () => {
       }
 
       const data = await response.json();
-      let content: string;
-
-      if (selectedProvider.name === 'OpenAI') {
-        content = data.choices?.[0]?.message?.content || 'No response generated';
-      } else if (selectedProvider.name === 'Anthropic') {
-        content = data.content?.[0]?.text || 'No response generated';
-      } else {
-        content = 'No response generated';
-      }
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content,
-        timestamp: new Date()
-      };
-
-      setMessages(prev => [...prev, assistantMessage]);
+      
+      // Handle tool calls
+      await handleApiResponse(data, newMessage.id);
+      
     } catch (error) {
       console.error('API Error:', error);
       toast({
@@ -356,6 +374,114 @@ export const MCPClient = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleApiResponse = async (data: any, messageId: string) => {
+    let content: string = '';
+    let toolCalls: ToolCall[] = [];
+
+    if (selectedProvider.name === 'OpenAI') {
+      const message = data.choices?.[0]?.message;
+      content = message?.content || '';
+      
+      if (message?.tool_calls) {
+        toolCalls = message.tool_calls.map((tc: any) => ({
+          id: tc.id,
+          name: tc.function.name,
+          args: JSON.parse(tc.function.arguments),
+          status: 'pending' as const
+        }));
+      }
+    } else if (selectedProvider.name === 'Anthropic') {
+      const responseContent = data.content || [];
+      
+      for (const item of responseContent) {
+        if (item.type === 'text') {
+          content += item.text;
+        } else if (item.type === 'tool_use') {
+          toolCalls.push({
+            id: item.id,
+            name: item.name,
+            args: item.input,
+            status: 'pending' as const
+          });
+        }
+      }
+    }
+
+    // Create assistant message
+    const assistantMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      role: 'assistant',
+      content,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, assistantMessage]);
+
+    // Execute tool calls if any
+    if (toolCalls.length > 0) {
+      await executeToolCalls(toolCalls, assistantMessage.id);
+    }
+  };
+
+  const executeToolCalls = async (toolCalls: ToolCall[], messageId: string) => {
+    for (const toolCall of toolCalls) {
+      try {
+        setActiveToolCall(toolCall.id);
+        
+        // Update tool call status to pending in UI
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId ? {
+            ...msg,
+            toolCalls: msg.toolCalls?.map(tc => 
+              tc.id === toolCall.id ? { ...tc, status: 'pending' as const } : tc
+            )
+          } : msg
+        ));
+
+        // Call the MCP tool
+        const result = await mcpClientRef.current.callTool(toolCall.name, toolCall.args);
+        
+        // Update tool call with result
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId ? {
+            ...msg,
+            toolCalls: msg.toolCalls?.map(tc => 
+              tc.id === toolCall.id ? { 
+                ...tc, 
+                result: result.content,
+                status: 'success' as const 
+              } : tc
+            )
+          } : msg
+        ));
+
+        addLog('info', `✅ Tool ${toolCall.name} executed successfully`);
+        
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        
+        // Update tool call with error
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId ? {
+            ...msg,
+            toolCalls: msg.toolCalls?.map(tc => 
+              tc.id === toolCall.id ? { 
+                ...tc, 
+                error: errorMessage,
+                status: 'error' as const 
+              } : tc
+            )
+          } : msg
+        ));
+
+        addLog('error', `❌ Tool ${toolCall.name} failed: ${errorMessage}`);
+      }
+    }
+    
+    setActiveToolCall(null);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -599,15 +725,95 @@ export const MCPClient = () => {
                     </div>
                   )}
                   
-                  <p className="whitespace-pre-wrap">{message.content}</p>
+                  {message.content && (
+                    <div className="prose prose-sm max-w-none dark:prose-invert">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {message.content}
+                      </ReactMarkdown>
+                    </div>
+                  )}
                   
                   {message.toolCalls && message.toolCalls.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1">
+                    <div className="mt-4 space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                        <Wrench className="w-3 h-3" />
+                        Tool Calls
+                      </div>
                       {message.toolCalls.map((toolCall, index) => (
-                        <Badge key={index} variant="secondary" className="text-xs">
-                          <Wrench className="w-3 h-3 mr-1" />
-                          {toolCall.name}
-                        </Badge>
+                        <Card key={index} className="bg-muted/50 border-l-4 border-l-primary">
+                          <div className="p-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <Badge variant={
+                                  toolCall.status === 'success' ? 'default' :
+                                  toolCall.status === 'error' ? 'destructive' : 'secondary'
+                                } className="text-xs">
+                                  {toolCall.status === 'pending' && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
+                                  {toolCall.status === 'success' && <Play className="w-3 h-3 mr-1" />}
+                                  {toolCall.status === 'error' && <FileText className="w-3 h-3 mr-1" />}
+                                  {toolCall.name}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {toolCall.status === 'pending' ? 'Running...' :
+                                   toolCall.status === 'success' ? 'Completed' : 'Failed'}
+                                </span>
+                              </div>
+                            </div>
+                            
+                            {Object.keys(toolCall.args).length > 0 && (
+                              <div>
+                                <div className="text-xs font-medium text-muted-foreground mb-1">Arguments:</div>
+                                <pre className="text-xs bg-background/50 p-2 rounded border overflow-x-auto">
+                                  {JSON.stringify(toolCall.args, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                            
+                            {toolCall.result && (
+                              <div>
+                                <div className="text-xs font-medium text-muted-foreground mb-1">Result:</div>
+                                <div className="text-xs bg-background/50 p-2 rounded border">
+                                  {Array.isArray(toolCall.result) ? (
+                                    toolCall.result.map((item: any, idx: number) => (
+                                      <div key={idx} className="mb-2 last:mb-0">
+                                        {item.type === 'text' ? (
+                                          <div className="prose prose-xs max-w-none dark:prose-invert">
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                              {item.text}
+                                            </ReactMarkdown>
+                                          </div>
+                                        ) : (
+                                          <pre className="whitespace-pre-wrap overflow-x-auto">
+                                            {typeof item === 'object' ? JSON.stringify(item, null, 2) : item}
+                                          </pre>
+                                        )}
+                                      </div>
+                                    ))
+                                  ) : typeof toolCall.result === 'object' ? (
+                                    <pre className="whitespace-pre-wrap overflow-x-auto">
+                                      {JSON.stringify(toolCall.result, null, 2)}
+                                    </pre>
+                                  ) : (
+                                    <div className="prose prose-xs max-w-none dark:prose-invert">
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                        {toolCall.result.toString()}
+                                      </ReactMarkdown>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {toolCall.error && (
+                              <div>
+                                <div className="text-xs font-medium text-destructive mb-1">Error:</div>
+                                <div className="text-xs bg-destructive/10 text-destructive p-2 rounded border">
+                                  {toolCall.error}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </Card>
                       ))}
                     </div>
                   )}
