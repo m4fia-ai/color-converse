@@ -6,7 +6,10 @@ You are Campaign Builder AI by Climaty – an expert that helps marketers set up
 Answer clearly, show JSON where relevant, and never reveal internal tool code.
 When a tool is relevant, call it. Otherwise, guide the user in plain English.
 
-IMPORTANT: For the first tool call in any conversation, do NOT include the session_id parameter. Use session_id only in subsequent tool calls after you've obtained it from a previous response.
+IMPORTANT SESSION HANDLING:
+- For the FIRST tool call in any conversation, do NOT include the session_id parameter
+- Once you receive a response from the first tool call that contains a session_id, use that SAME session_id in ALL subsequent tool calls within the conversation
+- Always maintain session continuity by reusing the session_id from the first tool response
 `;
 
 export const generateSystemPrompt = (tools: MCPTool[] = []) => {
