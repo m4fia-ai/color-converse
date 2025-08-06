@@ -89,6 +89,7 @@ export const MCPClient = () => {
   const [connectionLogs, setConnectionLogs] = useState<ConnectionLog[]>([]);
   const [isConnecting, setIsConnecting] = useState(false);
   const [activeToolCall, setActiveToolCall] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   // Provider settings
   const [apiKey, setApiKey] = useState('');
@@ -375,7 +376,64 @@ export const MCPClient = () => {
       setActiveToolCall(tc.id);
       updateToolCallStatus(tc.id, 'pending');
       try {
-        const result = await mcpClientRef.current.callTool(tc.name, tc.args);
+        // Automatically inject session_id for subsequent tool calls
+        const toolArgs = { ...tc.args };
+        if (sessionId && !toolArgs.session_id) {
+          toolArgs.session_id = sessionId;
+          addLog('info', `Auto-injecting session_id: ${sessionId} for tool ${tc.name}`);
+        }
+
+        const result = await mcpClientRef.current.callTool(tc.name, toolArgs);
+        
+        // Extract session_id from the first tool call response
+        if (!sessionId && result) {
+          let extractedSessionId = null;
+          
+          // Try to extract session_id from various possible response formats
+          if (result.content) {
+            if (Array.isArray(result.content)) {
+              // Check each content item for session_id
+              for (const item of result.content) {
+                if (typeof item === 'object' && item.session_id) {
+                  extractedSessionId = item.session_id;
+                  break;
+                }
+                if (typeof item === 'object' && item.text) {
+                  try {
+                    const parsed = JSON.parse(item.text);
+                    if (parsed.session_id) {
+                      extractedSessionId = parsed.session_id;
+                      break;
+                    }
+                  } catch (e) {
+                    // Not JSON, continue
+                  }
+                }
+              }
+            } else if (typeof result.content === 'object' && result.content.session_id) {
+              extractedSessionId = result.content.session_id;
+            } else if (typeof result.content === 'string') {
+              try {
+                const parsed = JSON.parse(result.content);
+                if (parsed.session_id) {
+                  extractedSessionId = parsed.session_id;
+                }
+              } catch (e) {
+                // Not JSON, continue
+              }
+            }
+          }
+          
+          // Also check top-level result for session_id
+          if (!extractedSessionId && result.session_id) {
+            extractedSessionId = result.session_id;
+          }
+          
+          if (extractedSessionId) {
+            setSessionId(extractedSessionId);
+            addLog('info', `Session ID captured from first tool call: ${extractedSessionId}`);
+          }
+        }
         
         // Extract text content from result.content if it's an array of objects
         let processedResult = result.content;
@@ -473,6 +531,15 @@ export const MCPClient = () => {
             />
           </div>
           
+          {/* Session ID Display */}
+          {sessionId && (
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-xs">
+                Session: {sessionId.slice(0, 8)}...
+              </Badge>
+            </div>
+          )}
+          
           {/* Connection Status */}
           <div className="flex items-center gap-2">
             <Circle 
@@ -511,6 +578,31 @@ export const MCPClient = () => {
               </DialogContent>
             </Dialog>
           )}
+          
+          {/* Clear Chat Button */}
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => {
+              setMessages([{
+                id: 'initial-greeting',
+                role: 'assistant',
+                content: INITIAL_GREETING,
+                timestamp: new Date(),
+              }]);
+              setSessionId(null);
+              providerMessagesRef.current = [{
+                role: 'system',
+                content: generateSystemPrompt(mcpTools),
+              }];
+              addLog('info', 'Chat cleared and session reset');
+              toast({ title: 'Chat cleared', description: 'Started new conversation' });
+            }}
+            className="border-primary text-primary"
+          >
+            <RefreshCw className="w-4 h-4 mr-2" />
+            New Chat
+          </Button>
 
           {/* Settings */}
           <Dialog>
