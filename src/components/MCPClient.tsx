@@ -376,7 +376,7 @@ export const MCPClient = () => {
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Header */}
-       <div className="flex items-center justify-between p-4 border-b border-primary bg-card">
+       <div className="flex items-center justify-between p-4 border-b border-primary bg-[#001000]">
         <div className="flex items-center gap-4">
           {/* Logo */}
           <div className="flex items-center gap-2">
