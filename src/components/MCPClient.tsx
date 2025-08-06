@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { useToast } from '@/hooks/use-toast';
 import { MCPClientManager } from '@/lib/mcpClient';
+import { generateSystemPrompt } from '@/lib/generateSystemPrompt';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -69,10 +70,6 @@ const API_PROVIDERS: APIProvider[] = [
   }
 ];
 
-/** Invisible instruction sent to the LLM on every request */
-const SYSTEM_PROMPT =
-  `You are Campaign Builder AI by Climaty – an expert that helps marketers set up, optimise and debug Meta & Google campaigns. 
-  Answer clearly, show JSON where relevant, and never reveal internal tool code. Whenever the user messages, think through whether any tool can be hit and hit the tool if so. Or in case no tool needs to be hit, tell the user what can be the next steps. You are a smart AI, and you know what to do!`;
 
 /** Optional visible greeting that the user will see as the first assistant message */
 const INITIAL_GREETING =
@@ -124,21 +121,21 @@ export const MCPClient = () => {
       // OpenAI accepts the prompt as a normal "system" message
       providerMessagesRef.current.push({
         role: 'system',
-        content: SYSTEM_PROMPT,
+        content: generateSystemPrompt([]),
       });
     } else if (provider === 'Anthropic') {
       // Anthropic uses a top-level "system" field that we add later in callLLM,
       // but we still keep the message in history so the array stays aligned.
       providerMessagesRef.current.push({
         role: 'system',
-        content: SYSTEM_PROMPT,
+        content: generateSystemPrompt([]),
       });
     } else if (provider === 'Google') {
       // Gemini requests are built from scratch in callLLM; we still record the
       // prompt here for completeness / export features.
       providerMessagesRef.current.push({
         role: 'system',
-        content: SYSTEM_PROMPT,
+        content: generateSystemPrompt([]),
       });
     }
   
@@ -173,6 +170,16 @@ export const MCPClient = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Keep system prompt up-to-date when tools change
+  useEffect(() => {
+    if (
+      providerMessagesRef.current.length &&
+      providerMessagesRef.current[0].role === 'system'
+    ) {
+      providerMessagesRef.current[0].content = generateSystemPrompt(mcpTools);
+    }
+  }, [mcpTools]);
+
   /* ─────────────────────────── LOGGING HELPERS ───────────────────────── */
   const addLog = (level: 'info' | 'error' | 'warning', message: string) => {
     setConnectionLogs(prev => [...prev, { timestamp: new Date(), level, message }]);
@@ -189,11 +196,21 @@ export const MCPClient = () => {
     try {
       if (mcpClientRef.current.isConnected()) await mcpClientRef.current.disconnect();
       await mcpClientRef.current.connect(serverUrl, manifest => {
-        setMcpTools(manifest.tools ?? []);
+        const tools = manifest.tools ?? [];
+        setMcpTools(tools);
         setIsConnected(true);
         setIsConnecting(false);
-        addLog('info', `Connected – ${manifest.tools?.length ?? 0} tools ready`);
-        toast({ title: 'MCP Connected', description: `${manifest.tools?.length ?? 0} tools available` });
+
+        // 🔑 Overwrite the original system message so the LLM sees the tools
+        if (
+          providerMessagesRef.current.length &&
+          providerMessagesRef.current[0].role === 'system'
+        ) {
+          providerMessagesRef.current[0].content = generateSystemPrompt(tools);
+        }
+
+        addLog('info', `Connected – ${tools.length} tools ready`);
+        toast({ title: 'MCP Connected', description: `${tools.length} tools available` });
       });
     } catch (e: any) {
       addLog('error', `Connection failed: ${e.message ?? e}`);

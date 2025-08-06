@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-interface MCPTool {
+export interface MCPTool {
   name: string;
   description: string;
   inputSchema?: any;
