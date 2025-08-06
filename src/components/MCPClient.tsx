@@ -69,6 +69,16 @@ const API_PROVIDERS: APIProvider[] = [
   }
 ];
 
+/** Invisible instruction sent to the LLM on every request */
+const SYSTEM_PROMPT =
+  `You are Campaign Builder AI – an expert that helps marketers set up, optimise and debug Meta & Google campaigns. 
+  Answer clearly, show JSON where relevant, and never reveal internal tool code.`;
+
+/** Optional visible greeting that the user will see as the first assistant message */
+const INITIAL_GREETING =
+  "Hi there 👋  I'm Campaign Builder AI. How can I help you launch or improve a campaign today?";
+
+
 export const MCPClient = () => {
   // UI conversation
   const [messages, setMessages] = useState<Message[]>([]);
@@ -92,6 +102,7 @@ export const MCPClient = () => {
   const mcpClientRef = useRef<MCPClientManager>(new MCPClientManager());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const didInitRef = useRef(false);
   const { toast } = useToast();
   const [serverUrl] = useState('https://redis-hosted-mcp-server-production.up.railway.app/mcp');
 
@@ -99,6 +110,48 @@ export const MCPClient = () => {
    *   can mutate synchronously without rerenders). Each element is already in
    *   the shape expected by the specific provider. */
   const providerMessagesRef = useRef<any[]>([]);
+
+
+  useEffect(() => {
+    if (didInitRef.current) return;   // already initialised
+    didInitRef.current = true;
+  
+    const now = new Date();
+    const provider = selectedProvider.name;   // "OpenAI" | "Anthropic" | "Google"
+  
+    /* 1️⃣  Push the hidden system prompt in the shape each provider expects */
+    if (provider === 'OpenAI') {
+      // OpenAI accepts the prompt as a normal "system" message
+      providerMessagesRef.current.push({
+        role: 'system',
+        content: SYSTEM_PROMPT,
+      });
+    } else if (provider === 'Anthropic') {
+      // Anthropic uses a top-level "system" field that we add later in callLLM,
+      // but we still keep the message in history so the array stays aligned.
+      providerMessagesRef.current.push({
+        role: 'system',
+        content: SYSTEM_PROMPT,
+      });
+    } else if (provider === 'Google') {
+      // Gemini requests are built from scratch in callLLM; we still record the
+      // prompt here for completeness / export features.
+      providerMessagesRef.current.push({
+        role: 'system',
+        content: SYSTEM_PROMPT,
+      });
+    }
+  
+    /* 2️⃣  Show a friendly greeting to the user */
+    setMessages([
+      {
+        id: 'initial-greeting',
+        role: 'assistant',
+        content: INITIAL_GREETING,
+        timestamp: now,
+      },
+    ]);
+  }, []); 
 
   /* ──────────────────────────── EFFECTS ──────────────────────────────── */
   useEffect(() => {
