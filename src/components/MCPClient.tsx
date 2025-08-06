@@ -636,7 +636,7 @@ export const MCPClient = () => {
                 <Card className="p-4 bg-card">
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="text-sm text-muted-foreground">Thinking...</span>
+                    <span className="text-sm text-muted-foreground bg-transparent border-none">Thinking...</span>
                   </div>
                 </Card>
               </div>
