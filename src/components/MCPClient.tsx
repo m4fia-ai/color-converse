@@ -70,23 +70,35 @@ const API_PROVIDERS: APIProvider[] = [
 ];
 
 export const MCPClient = () => {
+  // UI conversation
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  // MCP & connection state
   const [mcpTools, setMcpTools] = useState<MCPTool[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionLogs, setConnectionLogs] = useState<ConnectionLog[]>([]);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [activeToolCall, setActiveToolCall] = useState<string | null>(null);
+
+  // Provider settings
   const [apiKey, setApiKey] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<APIProvider>(API_PROVIDERS[0]);
   const [selectedModel, setSelectedModel] = useState('');
-  const [activeToolCall, setActiveToolCall] = useState<string | null>(null);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [serverUrl] = useState('https://final-meta-mcp-server-production.up.railway.app/mcp');
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Misc refs
   const mcpClientRef = useRef<MCPClientManager>(new MCPClientManager());
-  const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+  const [serverUrl] = useState('https://final-meta-mcp-server-production.up.railway.app/mcp');
+
+  /** Provider‑formatted conversation history (kept outside React state so we
+   *   can mutate synchronously without rerenders). Each element is already in
+   *   the shape expected by the specific provider. */
+  const providerMessagesRef = useRef<any[]>([]);
 
   useEffect(() => {
     // Load saved settings
@@ -188,446 +200,201 @@ export const MCPClient = () => {
   };
 
   const sendMessage = async () => {
-    if (!inputMessage.trim() && selectedImages.length === 0) return;
-    if (!apiKey) {
-      toast({
-        title: 'API Key Required',
-        description: 'Please set your API key in settings.',
-        variant: 'destructive'
-      });
-      return;
-    }
-    if (!selectedModel) {
-      toast({
-        title: 'Model Required',
-        description: 'Please select a model in settings.',
-        variant: 'destructive'
-      });
-      return;
-    }
+    if ((!inputMessage.trim() && selectedImages.length === 0) || isLoading) return;
+    if (!apiKey) return toast({ title: 'Missing API key', variant: 'destructive' });
 
-    const newMessage: Message = {
+    // 1️⃣ Update UI & provider histories ---------------------------------
+    const uiMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
       content: inputMessage,
-      images: selectedImages.length > 0 ? [...selectedImages] : undefined,
+      images: selectedImages.length ? [...selectedImages] : undefined,
       timestamp: new Date()
     };
-
-    setMessages(prev => [...prev, newMessage]);
+    setMessages(prev => [...prev, uiMsg]);
     setInputMessage('');
     setSelectedImages([]);
+
+    // Provider‑specific message format
+    const providerUserMsg = buildProviderUserMessage(inputMessage, selectedImages);
+    providerMessagesRef.current.push(providerUserMsg);
+
+    // 2️⃣ Call the model --------------------------------------------------
+    await callLLM();
+  };
+
+  /* ──────────────────────── LLM CALL WRAPPER ─────────────────────────── */
+  const callLLM = async () => {
     setIsLoading(true);
-
     try {
-      // Prepare the request based on the provider
-      let requestBody: any;
-      let headers: any = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      };
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      let body: any;
+      const provider = selectedProvider.name;
 
-      const messageContent: any = { role: 'user', content: inputMessage };
-      
-      // Add images if any (for models that support it)
-      if (selectedImages.length > 0 && selectedProvider.name === 'OpenAI') {
-        messageContent.content = [
-          { type: 'text', text: inputMessage },
-          ...selectedImages.map(image => ({
-            type: 'image_url',
-            image_url: { url: image }
-          }))
-        ];
-      }
-
-      if (selectedProvider.name === 'OpenAI') {
-        requestBody = {
-          model: selectedModel,
-          messages: [messageContent],
-          max_tokens: 1000
-        };
-      } else if (selectedProvider.name === 'Anthropic') {
+      if (provider === 'OpenAI') {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+        body = { model: selectedModel, messages: providerMessagesRef.current, max_tokens: 1000 };
+      } else if (provider === 'Anthropic') {
         headers['x-api-key'] = apiKey;
         headers['anthropic-version'] = '2023-06-01';
-        delete headers['Authorization'];
-        
-        requestBody = {
-          model: selectedModel,
-          max_tokens: 1000,
-          messages: [messageContent]
-        };
-      } else if (selectedProvider.name === 'Google') {
-        const response = await fetch(`${selectedProvider.baseUrl}/models/${selectedModel}:generateContent?key=${apiKey}`, {
+        body = { model: selectedModel, max_tokens: 1000, messages: providerMessagesRef.current };
+      } else {
+        // Google Gemini
+        const resp = await fetch(`${selectedProvider.baseUrl}/models/${selectedModel}:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{
-              parts: [{ text: inputMessage }]
-            }]
+            contents: [{ parts: [{ text: providerMessagesRef.current.map(m => m.content).join('\n\n') }] }]
           })
         });
-
-        if (!response.ok) {
-          throw new Error(`Google API error: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const content = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated';
-        
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content,
-          timestamp: new Date()
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
-        setIsLoading(false);
+        if (!resp.ok) throw new Error(`Gemini error ${resp.status}`);
+        const j = await resp.json();
+        const text = j.candidates?.[0]?.content?.parts?.[0]?.text ?? 'No response';
+        appendAssistantMessage(text);
         return;
       }
 
-      // Add MCP tools to the request if available and connected
-      if (isConnected && mcpTools.length > 0) {
-        if (selectedProvider.name === 'OpenAI') {
-          requestBody.tools = mcpTools.map(tool => ({
-            type: 'function',
-            function: {
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.inputSchema || {}
-            }
-          }));
-          requestBody.tool_choice = 'auto';
-        } else if (selectedProvider.name === 'Anthropic') {
-          requestBody.tools = mcpTools.map(tool => ({
-            name: tool.name,
-            description: tool.description,
-            input_schema: tool.inputSchema || {}
-          }));
-        }
+      // Add tools if available (OpenAI & Anthropic only)
+      if (mcpTools.length && isConnected) {
+        const toolsPayload = mcpTools.map(t => provider === 'OpenAI'
+          ? { type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema ?? {} } }
+          : { name: t.name, description: t.description, input_schema: t.inputSchema ?? {} }
+        );
+        body.tools = toolsPayload;
+        body.tool_choice = 'auto';
       }
 
-      // For OpenAI and Anthropic
-      const response = await fetch(selectedProvider.baseUrl + (selectedProvider.name === 'Anthropic' ? '/messages' : '/chat/completions'), {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody)
-      });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      
-      // Handle tool calls
-      await handleApiResponse(data, newMessage.id);
-      
-    } catch (error) {
-      console.error('API Error:', error);
-      toast({
-        title: 'Error',
-        description: `Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        variant: 'destructive'
-      });
+      const endpoint = selectedProvider.baseUrl + (provider === 'Anthropic' ? '/messages' : '/chat/completions');
+      const resp = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) });
+      if (!resp.ok) throw new Error(`${provider} API error ${resp.status}`);
+      const data = await resp.json();
+      await handleLLMResponse(data);
+    } catch (e: any) {
+      toast({ title: 'LLM Error', description: e.message ?? String(e), variant: 'destructive' });
+      addLog('error', e.message ?? String(e));
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleApiResponse = async (data: any, messageId: string) => {
-    let content: string = '';
-    let toolCalls: ToolCall[] = [];
+  /* ─────────────────── HANDLE FIRST ASSISTANT RESPONSE ───────────────── */
+  const handleLLMResponse = async (data: any) => {
+    const provider = selectedProvider.name;
 
-    if (selectedProvider.name === 'OpenAI') {
-      const message = data.choices?.[0]?.message;
-      content = message?.content || '';
-      
-      if (message?.tool_calls) {
-        toolCalls = message.tool_calls.map((tc: any) => ({
+    if (provider === 'OpenAI') {
+      const msg = data.choices?.[0]?.message;
+      if (!msg) return;
+
+      if (msg.tool_calls?.length) {
+        // Assistant wants to use tools
+        providerMessagesRef.current.push(msg); // content may be null, but tool_calls present
+        const toolCalls: ToolCall[] = msg.tool_calls.map((tc: any) => ({
           id: tc.id,
           name: tc.function.name,
           args: JSON.parse(tc.function.arguments),
-          status: 'pending' as const
+          status: 'pending'
         }));
+        appendAssistantMessage('', toolCalls); // Show placeholder in UI
+        await executeToolCallsNew(toolCalls);
+      } else {
+        appendAssistantMessage(msg.content ?? '');
+        providerMessagesRef.current.push({ role: 'assistant', content: msg.content ?? '' });
       }
-    } else if (selectedProvider.name === 'Anthropic') {
-      const responseContent = data.content || [];
-      
-      for (const item of responseContent) {
-        if (item.type === 'text') {
-          content += item.text;
-        } else if (item.type === 'tool_use') {
-          toolCalls.push({
-            id: item.id,
-            name: item.name,
-            args: item.input,
-            status: 'pending' as const
-          });
+    } else if (provider === 'Anthropic') {
+      const parts = data.content as any[];
+      const assistantMsgForProvider: any[] = [];
+      const toolCalls: ToolCall[] = [];
+      let collectedText = '';
+
+      for (const part of parts) {
+        if (part.type === 'text') {
+          collectedText += part.text;
+          assistantMsgForProvider.push(part);
+        } else if (part.type === 'tool_use') {
+          toolCalls.push({ id: part.id, name: part.name, args: part.input, status: 'pending' });
+          assistantMsgForProvider.push(part);
         }
       }
-    }
+      // Push assistant message (could include tool_use parts)
+      providerMessagesRef.current.push({ role: 'assistant', content: assistantMsgForProvider });
 
-    // Create assistant message
-    const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      role: 'assistant',
-      content,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, assistantMessage]);
-
-    // Execute tool calls if any
-    if (toolCalls.length > 0) {
-      await executeToolCalls(toolCalls, assistantMessage.id);
-    }
-  };
-
-  const executeToolCalls = async (toolCalls: ToolCall[], messageId: string) => {
-    const toolResults: any[] = [];
-    
-    for (const toolCall of toolCalls) {
-      try {
-        setActiveToolCall(toolCall.id);
-        
-        // Update tool call status to pending in UI
-        setMessages(prev => prev.map(msg => 
-          msg.id === messageId ? {
-            ...msg,
-            toolCalls: msg.toolCalls?.map(tc => 
-              tc.id === toolCall.id ? { ...tc, status: 'pending' as const } : tc
-            )
-          } : msg
-        ));
-
-        // Call the MCP tool
-        const result = await mcpClientRef.current.callTool(toolCall.name, toolCall.args);
-        
-        // Update tool call with result
-        setMessages(prev => prev.map(msg => 
-          msg.id === messageId ? {
-            ...msg,
-            toolCalls: msg.toolCalls?.map(tc => 
-              tc.id === toolCall.id ? { 
-                ...tc, 
-                result: result.content,
-                status: 'success' as const 
-              } : tc
-            )
-          } : msg
-        ));
-
-        // Store result for follow-up response
-        toolResults.push({
-          tool_call_id: toolCall.id,
-          tool_name: toolCall.name,
-          args: toolCall.args,
-          output: result.content
-        });
-
-        addLog('info', `✅ Tool ${toolCall.name} executed successfully`);
-        
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        
-        // Update tool call with error
-        setMessages(prev => prev.map(msg => 
-          msg.id === messageId ? {
-            ...msg,
-            toolCalls: msg.toolCalls?.map(tc => 
-              tc.id === toolCall.id ? { 
-                ...tc, 
-                error: errorMessage,
-                status: 'error' as const 
-              } : tc
-            )
-          } : msg
-        ));
-
-        // Store error for follow-up response
-        toolResults.push({
-          tool_call_id: toolCall.id,
-          tool_name: toolCall.name,
-          args: toolCall.args,
-          output: `Error: ${errorMessage}`
-        });
-
-        addLog('error', `❌ Tool ${toolCall.name} failed: ${errorMessage}`);
-      }
-    }
-
-    // Generate follow-up response based on tool results
-    if (toolResults.length > 0) {
-      await generateFollowUpResponse(toolResults, messageId);
-    }
-    
-    setActiveToolCall(null);
-  };
-
-  const generateFollowUpResponse = async (toolResults: any[], originalMessageId: string) => {
-    console.log('[Follow-up] Starting with tool results:', toolResults);
-    
-    try {
-      setIsLoading(true);
-      
-      // Get the conversation context
-      const currentMessages = [...messages];
-      const lastUserMessage = currentMessages.filter(m => m.role === 'user').pop();
-      
-      console.log('[Follow-up] Last user message:', lastUserMessage);
-      
-      if (!lastUserMessage) {
-        console.log('[Follow-up] No user message found, skipping');
-        return;
-      }
-
-      // Find the assistant message with tool calls
-      const assistantMessageWithTools = currentMessages.find(m => 
-        m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0
-      );
-
-      if (!assistantMessageWithTools) {
-        console.log('[Follow-up] No assistant message with tools found');
-        return;
-      }
-
-      let requestBody: any;
-      let headers: any = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      };
-
-      if (selectedProvider.name === 'OpenAI') {
-        // OpenAI pattern: user -> assistant with tool_calls -> tool messages -> assistant response
-        const conversationMessages = [
-          { role: 'user', content: lastUserMessage.content },
-          {
-            role: 'assistant',
-            content: null,
-            tool_calls: toolResults.map(result => ({
-              id: result.tool_call_id,
-              type: 'function',
-              function: {
-                name: result.tool_name,
-                arguments: JSON.stringify(result.args)
-              }
-            }))
-          }
-        ];
-
-        // Add tool result messages
-        toolResults.forEach(result => {
-          (conversationMessages as any[]).push({
-            role: 'tool',
-            tool_call_id: result.tool_call_id,
-            content: Array.isArray(result.output) 
-              ? result.output.map(item => item.type === 'text' ? item.text : JSON.stringify(item)).join('\n')
-              : typeof result.output === 'object' 
-                ? JSON.stringify(result.output, null, 2)
-                : result.output?.toString() || ''
-          });
-        });
-
-        requestBody = {
-          model: selectedModel,
-          messages: conversationMessages,
-          max_tokens: 1000
-        };
-
-      } else if (selectedProvider.name === 'Anthropic') {
-        // Anthropic pattern: user -> assistant with tool_use -> user with tool_result -> assistant response
-        headers['x-api-key'] = apiKey;
-        headers['anthropic-version'] = '2023-06-01';
-        delete headers['Authorization'];
-
-        const conversationMessages = [
-          { role: 'user', content: lastUserMessage.content },
-          {
-            role: 'assistant',
-            content: toolResults.map(result => ({
-              type: 'tool_use',
-              id: result.tool_call_id,
-              name: result.tool_name,
-              input: result.args
-            }))
-          },
-          {
-            role: 'user',
-            content: toolResults.map(result => ({
-              type: 'tool_result',
-              tool_use_id: result.tool_call_id,
-              content: Array.isArray(result.output) 
-                ? result.output.map(item => item.type === 'text' ? item.text : JSON.stringify(item, null, 2)).join('\n')
-                : typeof result.output === 'object' 
-                  ? JSON.stringify(result.output, null, 2)
-                  : result.output?.toString() || ''
-            }))
-          }
-        ];
-
-        requestBody = {
-          model: selectedModel,
-          max_tokens: 1000,
-          messages: conversationMessages
-        };
-      }
-
-      console.log('[Follow-up] Making API request to:', selectedProvider.baseUrl);
-      console.log('[Follow-up] Request body:', JSON.stringify(requestBody, null, 2));
-      
-      const response = await fetch(selectedProvider.baseUrl + (selectedProvider.name === 'Anthropic' ? '/messages' : '/chat/completions'), {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody)
-      });
-
-      console.log('[Follow-up] API response status:', response.status);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[Follow-up] API error response:', errorText);
-        throw new Error(`API error: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log('[Follow-up] API response data:', data);
-      
-      let content: string = '';
-
-      if (selectedProvider.name === 'OpenAI') {
-        content = data.choices?.[0]?.message?.content || 'No follow-up response generated';
-      } else if (selectedProvider.name === 'Anthropic') {
-        content = data.content?.[0]?.text || 'No follow-up response generated';
-      }
-
-      console.log('[Follow-up] Extracted content:', content);
-      
-      if (content && content.trim()) {
-        // Add the follow-up response as a new message
-        const followUpMessage: Message = {
-          id: (Date.now() + Math.random()).toString(),
-          role: 'assistant',
-          content,
-          timestamp: new Date()
-        };
-
-        console.log('[Follow-up] Adding follow-up message:', followUpMessage);
-        setMessages(prev => [...prev, followUpMessage]);
-        
-        addLog('info', '✅ Generated follow-up response based on tool results');
+      if (toolCalls.length) {
+        appendAssistantMessage(collectedText, toolCalls);
+        await executeToolCallsNew(toolCalls);
       } else {
-        addLog('warning', '⚠️ Empty follow-up response received');
+        appendAssistantMessage(collectedText);
       }
-      
-    } catch (error) {
-      console.error('[Follow-up] Error:', error);
-      addLog('error', `❌ Failed to generate follow-up response: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setIsLoading(false);
     }
   };
+
+  /* ───────────────────────── APPEND UI MESSAGE ───────────────────────── */
+  const appendAssistantMessage = (content: string, toolCalls?: ToolCall[]) => {
+    setMessages(prev => [
+      ...prev,
+      { id: (Date.now() + Math.random()).toString(), role: 'assistant', content, toolCalls, timestamp: new Date() }
+    ]);
+  };
+
+  /* ────────────────────────── NEW TOOL EXECUTION ─────────────────────────── */
+  const executeToolCallsNew = async (toolCalls: ToolCall[]) => {
+    const provider = selectedProvider.name;
+
+    for (const tc of toolCalls) {
+      setActiveToolCall(tc.id);
+      updateToolCallStatus(tc.id, 'pending');
+      try {
+        const result = await mcpClientRef.current.callTool(tc.name, tc.args);
+        tc.result = result.content;
+        tc.status = 'success';
+        updateToolCallStatus(tc.id, 'success', result.content);
+        addLog('info', `Tool ${tc.name} executed`);
+      } catch (e: any) {
+        tc.error = e.message ?? String(e);
+        tc.status = 'error';
+        updateToolCallStatus(tc.id, 'error', undefined, tc.error);
+        addLog('error', `Tool ${tc.name} failed: ${tc.error}`);
+      }
+
+      // Immediately push tool result to provider history
+      if (provider === 'OpenAI') {
+        providerMessagesRef.current.push({ role: 'tool', tool_call_id: tc.id, content: tc.result ?? tc.error });
+      } else if (provider === 'Anthropic') {
+        providerMessagesRef.current.push({
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: tc.id, content: tc.result ?? tc.error }]
+        });
+      }
+    }
+
+    setActiveToolCall(null);
+
+    // 🔁 Ask the LLM again so it can weave results into a final response
+    await callLLM();
+  };
+
+  /* Helper to update ToolCall status inside UI messages */
+  const updateToolCallStatus = (id: string, status: ToolCall['status'], result?: any, error?: string) => {
+    setMessages(prev => prev.map(m => ({
+      ...m,
+      toolCalls: m.toolCalls?.map(tc => tc.id === id ? { ...tc, status, result: result ?? tc.result, error: error ?? tc.error } : tc)
+    })));
+  };
+
+  /* ────────────── BUILD PROVIDER USER MESSAGE UTIL ──────────────────── */
+  const buildProviderUserMessage = (text: string, images: string[]) => {
+    const provider = selectedProvider.name;
+    if (provider === 'OpenAI' && images.length) {
+      return {
+        role: 'user',
+        content: [
+          { type: 'text', text },
+          ...images.map(url => ({ type: 'image_url', image_url: { url } }))
+        ]
+      };
+    }
+    return { role: 'user', content: text };
+  };
+
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
