@@ -633,10 +633,10 @@ export const MCPClient = () => {
                 <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
                   <Bot className="w-4 h-4 text-primary-foreground" />
                 </div>
-                <Card className="p-4 bg-card">
+                <Card className="p-4 bg-transparent border-none">
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="text-sm text-muted-foreground bg-transparent border-none">Thinking...</span>
+                    <span className="text-sm text-muted-foreground">Thinking...</span>
                   </div>
                 </Card>
               </div>
