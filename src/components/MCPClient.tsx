@@ -505,7 +505,7 @@ export const MCPClient = () => {
           { role: 'user', content: lastUserMessage.content },
           {
             role: 'assistant',
-            content: assistantMessageWithTools.content || '',
+            content: null,
             tool_calls: toolResults.map(result => ({
               id: result.tool_call_id,
               type: 'function',
@@ -534,38 +534,43 @@ export const MCPClient = () => {
           model: selectedModel,
           messages: conversationMessages,
           max_tokens: 1000
-          // Note: Don't include tools here for the follow-up call
         };
 
       } else if (selectedProvider.name === 'Anthropic') {
-        // Anthropic pattern: user -> assistant with tool_use -> user with tool results -> assistant response
+        // Anthropic pattern: user -> assistant with tool_use -> user with tool_result -> assistant response
         headers['x-api-key'] = apiKey;
         headers['anthropic-version'] = '2023-06-01';
         delete headers['Authorization'];
 
         const conversationMessages = [
-          { role: 'user', content: lastUserMessage.content }
-        ];
-
-        // Add tool results as user messages (Anthropic pattern)
-        toolResults.forEach(result => {
-          const toolResultContent = Array.isArray(result.output) 
-            ? result.output.map(item => item.type === 'text' ? item.text : JSON.stringify(item, null, 2)).join('\n')
-            : typeof result.output === 'object' 
-              ? JSON.stringify(result.output, null, 2)
-              : result.output?.toString() || '';
-
-          conversationMessages.push({
+          { role: 'user', content: lastUserMessage.content },
+          {
+            role: 'assistant',
+            content: toolResults.map(result => ({
+              type: 'tool_use',
+              id: result.tool_call_id,
+              name: result.tool_name,
+              input: result.args
+            }))
+          },
+          {
             role: 'user',
-            content: `Tool "${result.tool_name}" result:\n${toolResultContent}`
-          });
-        });
+            content: toolResults.map(result => ({
+              type: 'tool_result',
+              tool_use_id: result.tool_call_id,
+              content: Array.isArray(result.output) 
+                ? result.output.map(item => item.type === 'text' ? item.text : JSON.stringify(item, null, 2)).join('\n')
+                : typeof result.output === 'object' 
+                  ? JSON.stringify(result.output, null, 2)
+                  : result.output?.toString() || ''
+            }))
+          }
+        ];
 
         requestBody = {
           model: selectedModel,
           max_tokens: 1000,
           messages: conversationMessages
-          // Note: Don't include tools here for the follow-up call
         };
       }
 
