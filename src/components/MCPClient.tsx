@@ -376,7 +376,7 @@ export const MCPClient = () => {
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-border bg-card">
+       <div className="flex items-center justify-between p-4 border-b border-primary bg-card">
         <div className="flex items-center gap-4">
           {/* Logo */}
           <div className="flex items-center gap-2">
@@ -392,7 +392,7 @@ export const MCPClient = () => {
             <Circle 
               className={`w-3 h-3 fill-current ${connectionStatus.color}`}
             />
-            <span className="text-sm text-muted-foreground">{connectionStatus.label}</span>
+            <span className="text-sm text-foreground">{connectionStatus.label}</span>
           </div>
         </div>
 
@@ -401,7 +401,7 @@ export const MCPClient = () => {
           {mcpTools.length > 0 && (
             <Dialog>
               <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" className="border-primary text-primary hover:bg-primary/10">
                   <Wrench className="w-4 h-4 mr-2" />
                   Tools ({mcpTools.length})
                 </Button>
@@ -417,7 +417,6 @@ export const MCPClient = () => {
                         <div className="w-2 h-2 rounded-full bg-primary mt-2 flex-shrink-0" />
                         <div className="flex-1">
                           <h4 className="font-medium">{tool.name}</h4>
-                          <p className="text-sm text-muted-foreground mt-1">{tool.description}</p>
                         </div>
                       </div>
                     </Card>
@@ -430,7 +429,7 @@ export const MCPClient = () => {
           {/* Settings */}
           <Dialog>
             <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" className="border-primary text-primary hover:bg-primary/10">
                 <Settings className="w-4 h-4" />
               </Button>
             </DialogTrigger>
@@ -506,10 +505,10 @@ export const MCPClient = () => {
             {messages.length === 0 && (
               <div className="text-center py-12">
                 <Bot className="w-12 h-12 mx-auto text-primary mb-4" />
-                <h2 className="text-xl font-semibold text-foreground mb-2">
+                <h2 className="text-xl font-semibold mb-2 bg-gradient-to-r from-white to-[#999999] bg-clip-text text-transparent">
                   Welcome to Campaign Builder AI
                 </h2>
-                <p className="text-muted-foreground max-w-md mx-auto">
+                <p className="text-foreground max-w-md mx-auto">
                   Chat with me and launch your campaigns
                 </p>
               </div>
@@ -595,7 +594,7 @@ export const MCPClient = () => {
         </ScrollArea>
 
         {/* Input Area */}
-        <div className="border-t border-border bg-card p-4">
+        <div className="border-t border-primary bg-card p-4">
           <div className="max-w-4xl mx-auto">
             {selectedImages.length > 0 && (
               <div className="flex gap-2 mb-3 overflow-x-auto">
@@ -629,7 +628,7 @@ export const MCPClient = () => {
                 variant="outline"
                 size="sm"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex-shrink-0"
+                className="flex-shrink-0 border-primary text-primary hover:bg-primary/10"
               >
                 <Paperclip className="w-4 h-4" />
               </Button>
@@ -639,7 +638,7 @@ export const MCPClient = () => {
                 onChange={e => setInputMessage(e.target.value)}
                 onKeyDown={handleKeyPress}
                 placeholder="Type your message..."
-                className="flex-1 resize-none"
+                className="flex-1 resize-none border-primary focus:border-primary text-foreground"
                 rows={1}
                 style={{ minHeight: '40px', maxHeight: '120px' }}
               />
@@ -647,7 +646,7 @@ export const MCPClient = () => {
               <Button
                 onClick={sendMessage}
                 disabled={isLoading || (!inputMessage.trim() && selectedImages.length === 0)}
-                className="flex-shrink-0"
+                className="flex-shrink-0 bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               </Button>
