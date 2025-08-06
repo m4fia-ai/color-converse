@@ -577,9 +577,32 @@ export const MCPClient = () => {
                 <h2 className="text-xl font-semibold mb-2 bg-gradient-to-r from-white to-[#999999] bg-clip-text text-transparent">
                   Welcome to Campaign Builder AI
                 </h2>
-                <p className="text-foreground max-w-md mx-auto">
+                <p className="text-foreground max-w-md mx-auto mb-8">
                   Chat with me and launch your campaigns
                 </p>
+                <div className="max-w-lg mx-auto text-left bg-card/10 border border-primary/20 rounded-lg p-6">
+                  <h3 className="text-sm font-semibold text-white mb-4 text-center">How the Process Works:</h3>
+                  <div className="space-y-3 text-sm text-gray-300">
+                    <div className="flex items-start gap-3">
+                      <Circle className="h-2 w-2 text-primary mt-2 flex-shrink-0" />
+                      <div>
+                        <span className="font-medium text-white">AI Context:</span> Tool descriptions are injected into the AI's system prompt
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <Circle className="h-2 w-2 text-primary mt-2 flex-shrink-0" />
+                      <div>
+                        <span className="font-medium text-white">User Input:</span> When a user sends a message, the AI analyzes it against available tools
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <Circle className="h-2 w-2 text-primary mt-2 flex-shrink-0" />
+                      <div>
+                        <span className="font-medium text-white">Tool Selection:</span> The AI decides which tools to call based on the user's intent and tool descriptions
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
             
