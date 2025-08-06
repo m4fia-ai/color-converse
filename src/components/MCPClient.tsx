@@ -517,7 +517,7 @@ export const MCPClient = () => {
             {messages.map((msg) => (
               <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
-                  <div className="w-8 h-8 rounded-full bg-[#B8FFC5] flex items-center justify-center flex-shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
                     <Bot className="w-4 h-4 text-primary-foreground" />
                   </div>
                 )}
