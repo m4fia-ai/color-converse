@@ -663,10 +663,29 @@ export const MCPClient = () => {
                               <ChevronRight className="w-3 h-3 ml-auto" />
                             </CollapsibleTrigger>
                             <CollapsibleContent className="p-2 text-xs">
-                              <div className="space-y-1">
-                                <div><strong>Args:</strong> {JSON.stringify(tc.args, null, 2)}</div>
-                                {tc.result && <div><strong>Result:</strong> {tc.result}</div>}
-                                {tc.error && <div className="text-red-500"><strong>Error:</strong> {tc.error}</div>}
+                              <div className="space-y-2">
+                                <div>
+                                  <strong>Args:</strong>
+                                  <pre className="mt-1 p-2 bg-black/20 rounded text-xs overflow-auto">
+                                    {JSON.stringify(tc.args, null, 2)}
+                                  </pre>
+                                </div>
+                                {tc.result && (
+                                  <div>
+                                    <strong>Result:</strong>
+                                    <pre className="mt-1 p-2 bg-black/20 rounded text-xs overflow-auto whitespace-pre-wrap">
+                                      {typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2)}
+                                    </pre>
+                                  </div>
+                                )}
+                                {tc.error && (
+                                  <div className="text-red-500">
+                                    <strong>Error:</strong>
+                                    <pre className="mt-1 p-2 bg-red-900/20 rounded text-xs overflow-auto whitespace-pre-wrap">
+                                      {tc.error}
+                                    </pre>
+                                  </div>
+                                )}
                               </div>
                             </CollapsibleContent>
                           </Collapsible>
