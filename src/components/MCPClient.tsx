@@ -523,7 +523,7 @@ export const MCPClient = () => {
                 )}
                 
                 <div className={`max-w-[80%] ${msg.role === 'user' ? 'order-first' : ''}`}>
-                  <Card className={`p-4 ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-[#B8FFC5]'}`}>
+                  <Card className={`p-4 ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-[#185023]'}`}>
                     {msg.images && msg.images.length > 0 && (
                       <div className="grid grid-cols-2 gap-2 mb-3">
                         {msg.images.map((img, idx) => (
