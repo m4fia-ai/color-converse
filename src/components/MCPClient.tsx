@@ -119,48 +119,6 @@ export const MCPClient = () => {
     console.log(`[MCP ${level.toUpperCase()}] ${message}`);
   };
 
-  const sendMCPRequest = async (method: string, params?: any) => {
-    const requestBody: any = { method };
-    
-    // Only add params if they are provided and not empty
-    // This follows LibreChat's pattern of conditional parameter inclusion
-    if (params !== undefined && params !== null) {
-      if (typeof params === 'object' && Object.keys(params).length > 0) {
-        requestBody.params = params;
-      } else if (typeof params !== 'object') {
-        requestBody.params = params;
-      }
-    }
-    
-    addLog('info', `Sending MCP request: ${method} ${params ? `with params: ${JSON.stringify(params)}` : 'without params'}`);
-    
-    const response = await fetch('/api/mcp-proxy/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`MCP request failed (${response.status}): ${errorText}`);
-    }
-    
-    const data = await response.json();
-    addLog('info', `MCP response for ${method}: ${JSON.stringify(data)}`);
-    
-    if (data.error) {
-      throw new Error(`MCP ${method} error (${data.error.code}): ${data.error.message}${data.error.data ? ` - ${data.error.data}` : ''}`);
-    }
-    
-    return data;
-  };
-
-  const handleMCPEvent = (evt: any) => {
-    // Route tool responses and other events
-    addLog('info', `Received MCP event: ${evt.type || 'unknown'}`);
-    console.log('MCP Event:', evt);
-  };
-
   const connectToMCPServer = async () => {
     setIsConnecting(true);
     setIsConnected(false);
@@ -501,12 +459,16 @@ export const MCPClient = () => {
     }
 
     // Generate follow-up response based on tool results
-    await generateFollowUpResponse(toolResults, messageId);
+    if (toolResults.length > 0) {
+      await generateFollowUpResponse(toolResults, messageId);
+    }
     
     setActiveToolCall(null);
   };
 
   const generateFollowUpResponse = async (toolResults: any[], originalMessageId: string) => {
+    console.log('[Follow-up] Starting with tool results:', toolResults);
+    
     try {
       setIsLoading(true);
       
@@ -514,7 +476,12 @@ export const MCPClient = () => {
       const currentMessages = [...messages];
       const lastUserMessage = currentMessages.filter(m => m.role === 'user').pop();
       
-      if (!lastUserMessage) return;
+      console.log('[Follow-up] Last user message:', lastUserMessage);
+      
+      if (!lastUserMessage) {
+        console.log('[Follow-up] No user message found, skipping');
+        return;
+      }
 
       // Prepare follow-up request with tool results
       let requestBody: any;
@@ -589,17 +556,24 @@ export const MCPClient = () => {
         };
       }
 
+      console.log('[Follow-up] Making API request to:', selectedProvider.baseUrl);
+      console.log('[Follow-up] Request body:', JSON.stringify(requestBody, null, 2));
+      
       const response = await fetch(selectedProvider.baseUrl + (selectedProvider.name === 'Anthropic' ? '/messages' : '/chat/completions'), {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody)
       });
 
+      console.log('[Follow-up] API response status:', response.status);
+      
       if (!response.ok) {
         throw new Error(`API error: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
+      console.log('[Follow-up] API response data:', data);
+      
       let content: string = '';
 
       if (selectedProvider.name === 'OpenAI') {
@@ -608,6 +582,8 @@ export const MCPClient = () => {
         content = data.content?.[0]?.text || 'No follow-up response generated';
       }
 
+      console.log('[Follow-up] Extracted content:', content);
+      
       // Add the follow-up response as a new message
       const followUpMessage: Message = {
         id: (Date.now() + Math.random()).toString(),
@@ -616,10 +592,11 @@ export const MCPClient = () => {
         timestamp: new Date()
       };
 
+      console.log('[Follow-up] Adding follow-up message:', followUpMessage);
       setMessages(prev => [...prev, followUpMessage]);
       
     } catch (error) {
-      console.error('Follow-up response error:', error);
+      console.error('[Follow-up] Error:', error);
       addLog('error', `❌ Failed to generate follow-up response: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsLoading(false);
@@ -998,24 +975,6 @@ const ToolCallsDisplayComponent = ({ toolCalls }: { toolCalls: ToolCall[] }) => 
     });
   };
 
-  const getResultPreview = (result: any): string => {
-    if (!result) return '';
-    
-    if (Array.isArray(result)) {
-      const textItems = result.filter(item => item.type === 'text').map(item => item.text);
-      const preview = textItems.join(' ');
-      return preview.length > 100 ? preview.substring(0, 100) + '...' : preview;
-    }
-    
-    if (typeof result === 'object') {
-      const str = JSON.stringify(result);
-      return str.length > 100 ? str.substring(0, 100) + '...' : str;
-    }
-    
-    const str = result.toString();
-    return str.length > 100 ? str.substring(0, 100) + '...' : str;
-  };
-
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
@@ -1042,11 +1001,6 @@ const ToolCallsDisplayComponent = ({ toolCalls }: { toolCalls: ToolCall[] }) => 
                       </Badge>
                     </div>
                     <div className="flex items-center gap-2">
-                      {toolCall.result && (
-                        <span className="text-xs text-muted-foreground max-w-xs truncate">
-                          {getResultPreview(toolCall.result)}
-                        </span>
-                      )}
                       {isExpanded ? 
                         <ChevronDown className="w-4 h-4 text-muted-foreground" /> : 
                         <ChevronRight className="w-4 h-4 text-muted-foreground" />
@@ -1076,11 +1030,9 @@ const ToolCallsDisplayComponent = ({ toolCalls }: { toolCalls: ToolCall[] }) => 
                             {toolCall.result.map((item: any, idx: number) => (
                               <div key={idx}>
                                 {item.type === 'text' ? (
-                                  <div className="prose prose-sm max-w-none dark:prose-invert">
-                                    <pre className="whitespace-pre-wrap font-mono text-sm bg-muted/20 p-2 rounded border overflow-x-auto">
-                                      {item.text}
-                                    </pre>
-                                  </div>
+                                  <pre className="whitespace-pre-wrap font-mono text-sm bg-muted/20 p-2 rounded border overflow-x-auto">
+                                    {item.text}
+                                  </pre>
                                 ) : (
                                   <pre className="text-sm whitespace-pre-wrap overflow-x-auto bg-muted/30 p-2 rounded font-mono">
                                     {typeof item === 'object' ? JSON.stringify(item, null, 2) : item}
@@ -1119,3 +1071,5 @@ const ToolCallsDisplayComponent = ({ toolCalls }: { toolCalls: ToolCall[] }) => 
     </div>
   );
 };
+
+export default MCPClient;
