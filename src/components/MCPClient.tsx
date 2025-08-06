@@ -359,9 +359,25 @@ export const MCPClient = () => {
       updateToolCallStatus(tc.id, 'pending');
       try {
         const result = await mcpClientRef.current.callTool(tc.name, tc.args);
-        tc.result = result.content;
+        
+        // Extract text content from result.content if it's an array of objects
+        let processedResult = result.content;
+        if (Array.isArray(result.content)) {
+          processedResult = result.content
+            .map((item: any) => {
+              if (typeof item === 'object' && item.type === 'text' && item.text) {
+                return item.text;
+              }
+              return typeof item === 'string' ? item : JSON.stringify(item);
+            })
+            .join('\n');
+        } else if (typeof result.content === 'object') {
+          processedResult = JSON.stringify(result.content);
+        }
+        
+        tc.result = processedResult;
         tc.status = 'success';
-        updateToolCallStatus(tc.id, 'success', result.content);
+        updateToolCallStatus(tc.id, 'success', processedResult);
         addLog('info', `Tool ${tc.name} executed`);
       } catch (e: any) {
         tc.error = e.message ?? String(e);
