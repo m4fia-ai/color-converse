@@ -5,10 +5,11 @@ import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { Textarea } from './ui/textarea';
-import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw, Play, FileText } from 'lucide-react';
+import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw, Play, FileText, ChevronDown, ChevronRight } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { useToast } from '@/hooks/use-toast';
 import { MCPClientManager } from '@/lib/mcpClient';
 import ReactMarkdown from 'react-markdown';
@@ -427,6 +428,8 @@ export const MCPClient = () => {
   };
 
   const executeToolCalls = async (toolCalls: ToolCall[], messageId: string) => {
+    const toolResults: any[] = [];
+    
     for (const toolCall of toolCalls) {
       try {
         setActiveToolCall(toolCall.id);
@@ -458,6 +461,12 @@ export const MCPClient = () => {
           } : msg
         ));
 
+        // Store result for follow-up response
+        toolResults.push({
+          tool_call_id: toolCall.id,
+          output: result.content
+        });
+
         addLog('info', `✅ Tool ${toolCall.name} executed successfully`);
         
       } catch (error) {
@@ -477,11 +486,115 @@ export const MCPClient = () => {
           } : msg
         ));
 
+        // Store error for follow-up response
+        toolResults.push({
+          tool_call_id: toolCall.id,
+          output: `Error: ${errorMessage}`
+        });
+
         addLog('error', `❌ Tool ${toolCall.name} failed: ${errorMessage}`);
       }
     }
+
+    // Generate follow-up response based on tool results
+    await generateFollowUpResponse(toolResults, messageId);
     
     setActiveToolCall(null);
+  };
+
+  const generateFollowUpResponse = async (toolResults: any[], originalMessageId: string) => {
+    try {
+      setIsLoading(true);
+      
+      // Get the original message and all previous messages for context
+      const allMessages = messages;
+      const userMessage = allMessages.find(m => m.role === 'user');
+      
+      if (!userMessage) return;
+
+      // Prepare follow-up request with tool results
+      let requestBody: any;
+      let headers: any = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      };
+
+      if (selectedProvider.name === 'OpenAI') {
+        // For OpenAI, add tool results as tool messages
+        const conversationMessages = [
+          { role: 'user', content: userMessage.content },
+          { role: 'assistant', content: '', tool_calls: toolResults.map(tr => ({
+            id: tr.tool_call_id,
+            type: 'function',
+            function: { name: '', arguments: '{}' }
+          })) },
+          ...toolResults.map(result => ({
+            role: 'tool',
+            tool_call_id: result.tool_call_id,
+            content: typeof result.output === 'object' ? JSON.stringify(result.output) : result.output?.toString() || ''
+          }))
+        ];
+
+        requestBody = {
+          model: selectedModel,
+          messages: conversationMessages,
+          max_tokens: 1000
+        };
+      } else if (selectedProvider.name === 'Anthropic') {
+        headers['x-api-key'] = apiKey;
+        headers['anthropic-version'] = '2023-06-01';
+        delete headers['Authorization'];
+
+        // For Anthropic, add tool results as user messages
+        const toolResultsText = toolResults.map(result => 
+          `Tool ${result.tool_call_id} result: ${typeof result.output === 'object' ? JSON.stringify(result.output, null, 2) : result.output}`
+        ).join('\n\n');
+
+        requestBody = {
+          model: selectedModel,
+          max_tokens: 1000,
+          messages: [
+            { role: 'user', content: userMessage.content },
+            { role: 'user', content: `Based on these tool results, please provide a comprehensive response:\n\n${toolResultsText}` }
+          ]
+        };
+      }
+
+      const response = await fetch(selectedProvider.baseUrl + (selectedProvider.name === 'Anthropic' ? '/messages' : '/chat/completions'), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      let content: string = '';
+
+      if (selectedProvider.name === 'OpenAI') {
+        content = data.choices?.[0]?.message?.content || 'No follow-up response generated';
+      } else if (selectedProvider.name === 'Anthropic') {
+        content = data.content?.[0]?.text || 'No follow-up response generated';
+      }
+
+      // Add the follow-up response as a new message
+      const followUpMessage: Message = {
+        id: (Date.now() + Math.random()).toString(),
+        role: 'assistant',
+        content,
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, followUpMessage]);
+      
+    } catch (error) {
+      console.error('Follow-up response error:', error);
+      addLog('error', `❌ Failed to generate follow-up response: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -734,87 +847,8 @@ export const MCPClient = () => {
                   )}
                   
                   {message.toolCalls && message.toolCalls.length > 0 && (
-                    <div className="mt-4 space-y-3">
-                      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                        <Wrench className="w-3 h-3" />
-                        Tool Calls
-                      </div>
-                      {message.toolCalls.map((toolCall, index) => (
-                        <Card key={index} className="bg-muted/50 border-l-4 border-l-primary">
-                          <div className="p-3 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <Badge variant={
-                                  toolCall.status === 'success' ? 'default' :
-                                  toolCall.status === 'error' ? 'destructive' : 'secondary'
-                                } className="text-xs">
-                                  {toolCall.status === 'pending' && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
-                                  {toolCall.status === 'success' && <Play className="w-3 h-3 mr-1" />}
-                                  {toolCall.status === 'error' && <FileText className="w-3 h-3 mr-1" />}
-                                  {toolCall.name}
-                                </Badge>
-                                <span className="text-xs text-muted-foreground">
-                                  {toolCall.status === 'pending' ? 'Running...' :
-                                   toolCall.status === 'success' ? 'Completed' : 'Failed'}
-                                </span>
-                              </div>
-                            </div>
-                            
-                            {Object.keys(toolCall.args).length > 0 && (
-                              <div>
-                                <div className="text-xs font-medium text-muted-foreground mb-1">Arguments:</div>
-                                <pre className="text-xs bg-background/50 p-2 rounded border overflow-x-auto">
-                                  {JSON.stringify(toolCall.args, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                            
-                            {toolCall.result && (
-                              <div>
-                                <div className="text-xs font-medium text-muted-foreground mb-1">Result:</div>
-                                <div className="text-xs bg-background/50 p-2 rounded border">
-                                  {Array.isArray(toolCall.result) ? (
-                                    toolCall.result.map((item: any, idx: number) => (
-                                      <div key={idx} className="mb-2 last:mb-0">
-                                        {item.type === 'text' ? (
-                                          <div className="prose prose-xs max-w-none dark:prose-invert">
-                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                              {item.text}
-                                            </ReactMarkdown>
-                                          </div>
-                                        ) : (
-                                          <pre className="whitespace-pre-wrap overflow-x-auto">
-                                            {typeof item === 'object' ? JSON.stringify(item, null, 2) : item}
-                                          </pre>
-                                        )}
-                                      </div>
-                                    ))
-                                  ) : typeof toolCall.result === 'object' ? (
-                                    <pre className="whitespace-pre-wrap overflow-x-auto">
-                                      {JSON.stringify(toolCall.result, null, 2)}
-                                    </pre>
-                                  ) : (
-                                    <div className="prose prose-xs max-w-none dark:prose-invert">
-                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                        {toolCall.result.toString()}
-                                      </ReactMarkdown>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                            
-                            {toolCall.error && (
-                              <div>
-                                <div className="text-xs font-medium text-destructive mb-1">Error:</div>
-                                <div className="text-xs bg-destructive/10 text-destructive p-2 rounded border">
-                                  {toolCall.error}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </Card>
-                      ))}
+                     <div className="mt-4">
+                       <ToolCallsDisplayComponent toolCalls={message.toolCalls} />
                     </div>
                   )}
                 </Card>
@@ -915,6 +949,150 @@ export const MCPClient = () => {
           />
         </div>
       </div>
+    </div>
+  );
+};
+
+// Tool Calls Display Component
+const ToolCallsDisplayComponent = ({ toolCalls }: { toolCalls: ToolCall[] }) => {
+  const [expandedCalls, setExpandedCalls] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (toolCallId: string) => {
+    setExpandedCalls(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(toolCallId)) {
+        newSet.delete(toolCallId);
+      } else {
+        newSet.add(toolCallId);
+      }
+      return newSet;
+    });
+  };
+
+  const getResultPreview = (result: any): string => {
+    if (!result) return '';
+    
+    if (Array.isArray(result)) {
+      const textItems = result.filter(item => item.type === 'text').map(item => item.text);
+      const preview = textItems.join(' ');
+      return preview.length > 100 ? preview.substring(0, 100) + '...' : preview;
+    }
+    
+    if (typeof result === 'object') {
+      const str = JSON.stringify(result);
+      return str.length > 100 ? str.substring(0, 100) + '...' : str;
+    }
+    
+    const str = result.toString();
+    return str.length > 100 ? str.substring(0, 100) + '...' : str;
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <Wrench className="w-3 h-3" />
+        Tool Calls ({toolCalls.length})
+      </div>
+      {toolCalls.map((toolCall) => {
+        const isExpanded = expandedCalls.has(toolCall.id);
+        return (
+          <Card key={toolCall.id} className="bg-muted/30 border-l-4 border-l-primary overflow-hidden">
+            <Collapsible open={isExpanded} onOpenChange={() => toggleExpanded(toolCall.id)}>
+              <CollapsibleTrigger asChild>
+                <div className="w-full p-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={
+                        toolCall.status === 'success' ? 'default' :
+                        toolCall.status === 'error' ? 'destructive' : 'secondary'
+                      } className="text-xs">
+                        {toolCall.status === 'pending' && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
+                        {toolCall.status === 'success' && <Play className="w-3 h-3 mr-1" />}
+                        {toolCall.status === 'error' && <FileText className="w-3 h-3 mr-1" />}
+                        {toolCall.name}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {toolCall.status === 'pending' ? 'Running...' :
+                         toolCall.status === 'success' ? 'Completed' : 'Failed'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {toolCall.result && (
+                        <span className="text-xs text-muted-foreground max-w-xs truncate">
+                          {getResultPreview(toolCall.result)}
+                        </span>
+                      )}
+                      {isExpanded ? 
+                        <ChevronDown className="w-4 h-4 text-muted-foreground" /> : 
+                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                      }
+                    </div>
+                  </div>
+                </div>
+              </CollapsibleTrigger>
+              
+              <CollapsibleContent>
+                <div className="px-3 pb-3 space-y-3 border-t border-border/50">
+                  {Object.keys(toolCall.args).length > 0 && (
+                    <div className="pt-3">
+                      <div className="text-xs font-medium text-muted-foreground mb-2">Arguments:</div>
+                      <pre className="text-xs bg-background/60 p-3 rounded border overflow-x-auto">
+                        {JSON.stringify(toolCall.args, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  
+                  {toolCall.result && (
+                    <div>
+                      <div className="text-xs font-medium text-muted-foreground mb-2">Result:</div>
+                      <div className="bg-background/60 p-3 rounded border">
+                        {Array.isArray(toolCall.result) ? (
+                          <div className="space-y-3">
+                            {toolCall.result.map((item: any, idx: number) => (
+                              <div key={idx} className="border-l-2 border-primary/30 pl-3">
+                                {item.type === 'text' ? (
+                                  <div className="prose prose-sm max-w-none dark:prose-invert">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                      {item.text}
+                                    </ReactMarkdown>
+                                  </div>
+                                ) : (
+                                  <pre className="text-sm whitespace-pre-wrap overflow-x-auto bg-muted/30 p-2 rounded">
+                                    {typeof item === 'object' ? JSON.stringify(item, null, 2) : item}
+                                  </pre>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : typeof toolCall.result === 'object' ? (
+                          <pre className="text-sm whitespace-pre-wrap overflow-x-auto">
+                            {JSON.stringify(toolCall.result, null, 2)}
+                          </pre>
+                        ) : (
+                          <div className="prose prose-sm max-w-none dark:prose-invert">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {toolCall.result.toString()}
+                            </ReactMarkdown>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {toolCall.error && (
+                    <div>
+                      <div className="text-xs font-medium text-destructive mb-2">Error:</div>
+                      <div className="text-sm bg-destructive/10 text-destructive p-3 rounded border border-destructive/20">
+                        {toolCall.error}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </Card>
+        );
+      })}
     </div>
   );
 };
