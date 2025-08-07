@@ -29,11 +29,7 @@ export class MCPClientManager {
         {
           requestInit: {
             // Add any additional headers if needed
-          },
-          // new timeout configuration:
-          timeout: 180_000,              // wait up to 120 000 ms instead of 60 000 ms :contentReference[oaicite:0]{index=0}
-          resetTimeoutOnProgress: true,  // if the server streams progress events, keep resetting the timer :contentReference[oaicite:1]{index=1}
-          maxTotalTimeout: 300_000
+          }
         }
       );
 
