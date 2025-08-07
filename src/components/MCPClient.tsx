@@ -5,7 +5,7 @@ import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { Textarea } from './ui/textarea';
-import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw, Play, FileText, ChevronDown, ChevronRight, Circle } from 'lucide-react';
+import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw, Play, FileText, ChevronDown, ChevronRight, Circle, Copy, Check } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -89,6 +89,7 @@ export const MCPClient = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [activeToolCall, setActiveToolCall] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
 
   // Provider settings
   const [apiKey, setApiKey] = useState('');
@@ -230,6 +231,20 @@ export const MCPClient = () => {
     });
   };
   const removeImage = (idx: number) => setSelectedImages(prev => prev.filter((_, i) => i !== idx));
+
+  // Copy functionality
+  const copyToClipboard = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedStates(prev => ({ ...prev, [id]: true }));
+      setTimeout(() => {
+        setCopiedStates(prev => ({ ...prev, [id]: false }));
+      }, 2000);
+      toast({ title: 'Copied to clipboard', description: 'Content copied successfully' });
+    } catch (err) {
+      toast({ title: 'Copy failed', description: 'Failed to copy to clipboard', variant: 'destructive' });
+    }
+  };
 
   /* ────────────────────────── SEND MESSAGE ──────────────────────────── */
   const sendMessage = async () => {
@@ -751,20 +766,48 @@ export const MCPClient = () => {
                             </CollapsibleTrigger>
                             <CollapsibleContent className="p-2 text-xs">
                               <div className="space-y-2">
-                                <div>
-                                  <strong>Args:</strong>
-                                  <pre className="mt-1 p-2 bg-black/20 rounded text-xs overflow-auto max-h-24">
-                                    {JSON.stringify(tc.args, null, 2)}
-                                  </pre>
-                                </div>
-                                {tc.result && (
-                                  <div>
-                                    <strong>Result:</strong>
-                                    <pre className="mt-1 p-2 bg-black/20 rounded text-xs overflow-auto whitespace-pre-wrap max-h-32">
-                                      {typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2)}
-                                    </pre>
-                                  </div>
-                                )}
+                                 <div>
+                                   <strong>Args:</strong>
+                                   <div className="relative">
+                                     <pre className="mt-1 p-2 bg-black/20 rounded text-xs overflow-auto max-h-24 pr-8">
+                                       {JSON.stringify(tc.args, null, 2)}
+                                     </pre>
+                                     <Button
+                                       variant="ghost"
+                                       size="sm"
+                                       className="absolute top-2 right-1 h-6 w-6 p-0 hover:bg-white/10"
+                                       onClick={() => copyToClipboard(JSON.stringify(tc.args, null, 2), `msg-args-${tc.id}`)}
+                                     >
+                                       {copiedStates[`msg-args-${tc.id}`] ? (
+                                         <Check className="h-3 w-3 text-green-400" />
+                                       ) : (
+                                         <Copy className="h-3 w-3 text-white/70" />
+                                       )}
+                                     </Button>
+                                   </div>
+                                 </div>
+                                 {tc.result && (
+                                   <div>
+                                     <strong>Result:</strong>
+                                     <div className="relative">
+                                       <pre className="mt-1 p-2 bg-black/20 rounded text-xs overflow-auto whitespace-pre-wrap max-h-32 pr-8">
+                                         {typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2)}
+                                       </pre>
+                                       <Button
+                                         variant="ghost"
+                                         size="sm"
+                                         className="absolute top-2 right-1 h-6 w-6 p-0 hover:bg-white/10"
+                                         onClick={() => copyToClipboard(typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2), `msg-result-${tc.id}`)}
+                                       >
+                                         {copiedStates[`msg-result-${tc.id}`] ? (
+                                           <Check className="h-3 w-3 text-green-400" />
+                                         ) : (
+                                           <Copy className="h-3 w-3 text-white/70" />
+                                         )}
+                                       </Button>
+                                     </div>
+                                   </div>
+                                 )}
                                 {tc.error && (
                                   <div className="text-red-500">
                                     <strong>Error:</strong>
@@ -848,15 +891,28 @@ export const MCPClient = () => {
                 <Paperclip className="w-4 h-4" />
               </Button>
               
-              <Textarea
-                value={inputMessage}
-                onChange={e => setInputMessage(e.target.value)}
-                onKeyDown={handleKeyPress}
-                placeholder="Type your message..."
-                className="flex-1 resize-none border-primary focus:border-primary text-foreground"
-                rows={1}
-                style={{ minHeight: '40px', maxHeight: '120px' }}
-              />
+               <Textarea
+                 value={inputMessage}
+                 onChange={(e) => {
+                   setInputMessage(e.target.value);
+                   // Auto-resize
+                   const textarea = e.target;
+                   textarea.style.height = 'auto';
+                   textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+                 }}
+                 onKeyDown={(e) => {
+                   if (e.key === 'Enter' && !e.shiftKey) {
+                     e.preventDefault();
+                     sendMessage();
+                   }
+                 }}
+                 placeholder="Type your message..."
+                 className="flex-1 resize-none border-primary focus:border-primary text-foreground min-h-[40px] max-h-[200px]"
+                 style={{
+                   height: 'auto',
+                   overflowY: inputMessage.split('\n').length > 4 ? 'auto' : 'hidden'
+                 }}
+               />
               
               <Button
                 onClick={sendMessage}
