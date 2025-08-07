@@ -76,7 +76,14 @@ export class MCPClientManager {
       const result = await this.client.callTool({
         name,
         arguments: args
-      });
+      },
+      undefined,                                   // 2️⃣ use default result schema
+  {                                            // 3️⃣ time-out controls
+    timeout: 180_000,            // 2 min inactivity window
+    resetTimeoutOnProgress: true, // keep extending if server streams progress
+    maxTotalTimeout: 300_000      // but never wait >5 min overall
+  }
+      );
       
       console.log(`[MCP] Tool response:`, result);
       return result;
