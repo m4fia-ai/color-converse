@@ -13,8 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collap
 import { useToast } from '@/hooks/use-toast';
 import { MCPClientManager } from '@/lib/mcpClient';
 import { generateSystemPrompt } from '@/lib/generateSystemPrompt';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface MCPTool {
   name: string;
@@ -734,38 +733,34 @@ export const MCPClient = () => {
                     )}
                     
                     {msg.content && (
-                      <div className="prose prose-sm max-w-none dark:prose-invert">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {msg.content}
-                        </ReactMarkdown>
-                      </div>
+                      <MarkdownRenderer content={msg.content} />
                     )}
                     
                     {msg.toolCalls && msg.toolCalls.length > 0 && (
-                      <div className="mt-3 space-y-2">
+                      <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
                         {msg.toolCalls.map((tc) => (
                           <Collapsible key={tc.id}>
-                            <CollapsibleTrigger className="flex items-center gap-2 w-full text-left p-2 rounded bg-transparent">
+                            <CollapsibleTrigger className="flex items-center gap-2 w-full text-left p-2 rounded bg-transparent text-xs">
                               <div className={`w-2 h-2 rounded-full ${
                                 tc.status === 'success' ? 'bg-green-500' :
                                 tc.status === 'error' ? 'bg-red-500' : 'bg-yellow-500'
                               }`} />
                               <Wrench className="w-3 h-3" />
-                              <span className="text-sm font-medium">{tc.name}</span>
+                              <span className="text-xs font-medium">{tc.name}</span>
                               <ChevronRight className="w-3 h-3 ml-auto" />
                             </CollapsibleTrigger>
                             <CollapsibleContent className="p-2 text-xs">
                               <div className="space-y-2">
                                 <div>
                                   <strong>Args:</strong>
-                                  <pre className="mt-1 p-2 bg-black/20 rounded text-xs overflow-auto">
+                                  <pre className="mt-1 p-2 bg-black/20 rounded text-xs overflow-auto max-h-24">
                                     {JSON.stringify(tc.args, null, 2)}
                                   </pre>
                                 </div>
                                 {tc.result && (
                                   <div>
                                     <strong>Result:</strong>
-                                    <pre className="mt-1 p-2 bg-black/20 rounded text-xs overflow-auto whitespace-pre-wrap">
+                                    <pre className="mt-1 p-2 bg-black/20 rounded text-xs overflow-auto whitespace-pre-wrap max-h-32">
                                       {typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2)}
                                     </pre>
                                   </div>
@@ -773,7 +768,7 @@ export const MCPClient = () => {
                                 {tc.error && (
                                   <div className="text-red-500">
                                     <strong>Error:</strong>
-                                    <pre className="mt-1 p-2 bg-red-900/20 rounded text-xs overflow-auto whitespace-pre-wrap">
+                                    <pre className="mt-1 p-2 bg-red-900/20 rounded text-xs overflow-auto whitespace-pre-wrap max-h-24">
                                       {tc.error}
                                     </pre>
                                   </div>
