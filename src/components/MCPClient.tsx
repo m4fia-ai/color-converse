@@ -484,15 +484,15 @@ export const MCPClient = () => {
                     content: null,
                   });
                   
-                  // Only create message if there's content or we haven't created one yet
-                  if (fullText.trim() || !messageCreated) {
+                  // Create or update message with tool calls
+                  if (!messageCreated) {
                     appendAssistantMessage(fullText, toolCalls);
                     messageCreated = true;
                   } else {
-                    // Update existing message with tool calls
+                    // Update existing streaming message with tool calls
                     setMessages(prev =>
                       prev.map(m =>
-                        m.id === streamingId ? { ...m, toolCalls } : m
+                        m.id === streamingId ? { ...m, toolCalls, isStreaming: false } : m
                       )
                     );
                   }
@@ -536,15 +536,15 @@ export const MCPClient = () => {
                   role: 'assistant',
                   content: [parsed],            // Claude's own shape
                 });
-                // Only create message if there's content or we haven't created one yet
-                if (fullText.trim() || !messageCreated) {
+                // Create or update message with tool calls
+                if (!messageCreated) {
                   appendAssistantMessage(fullText, toolCalls);
                   messageCreated = true;
                 } else {
-                  // Update existing message with tool calls
+                  // Update existing streaming message with tool calls
                   setMessages(prev =>
                     prev.map(m =>
-                      m.id === streamingId ? { ...m, toolCalls } : m
+                      m.id === streamingId ? { ...m, toolCalls, isStreaming: false } : m
                     )
                   );
                 }
