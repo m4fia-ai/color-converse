@@ -340,7 +340,7 @@ export const MCPClient = () => {
       if (shouldStream) {
         addLog('info', 'Attempting to handle as streaming response');
         addLog('info', JSON.stringify(resp))
-        await handleStreamingResponse(resp);
+        await handleStreamingResponse(resp, provider);
         return;
       }
 
@@ -364,7 +364,7 @@ export const MCPClient = () => {
   };
 
   /* ─────────────────── HANDLE STREAMING RESPONSE ──────────────────────── */
-  const handleStreamingResponse = async (response: Response) => {
+  const handleStreamingResponse = async (response: Response, provider: string) => {
     const reader = response.body!
       .pipeThrough(new TextDecoderStream())
       .getReader();
@@ -390,8 +390,10 @@ export const MCPClient = () => {
       const raw = buffer.slice(0, boundary).replace(/\r/g, '').trim();   // one event
       buffer = buffer.slice(boundary + 2);            // rest of the stream
 
-          if (!raw.startsWith('data:')) continue;
-          const data = raw.replace(/^data:\s*/, '');
+          // Anthropic adds an "event:" header before "data:"
+          const dataLine = raw.split('\n').find(l => l.startsWith('data:'));
+          if (!dataLine) continue;
+          const data = dataLine.replace(/^data:\s*/, '');
 
           if (data === '[DONE]') {
             reader.cancel();
@@ -405,15 +407,18 @@ export const MCPClient = () => {
             // Handle different provider formats
             let delta = '';
             
-            if (parsed.choices?.[0]?.delta?.content) {
-              // OpenAI format
-              delta = parsed.choices[0].delta.content;
-            } else if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
-              // Anthropic format: content_block_delta with text_delta
-              delta = parsed.delta.text;
-            } else if (parsed.candidates?.[0]?.content?.parts?.[0]?.text) {
-              // Google format
-              delta = parsed.candidates[0].content.parts[0].text;
+            if (provider === 'OpenAI') {
+              delta = parsed.choices?.[0]?.delta?.content ?? '';
+            } else if (provider === 'Anthropic') {
+              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                delta = parsed.delta.text;
+              }
+              if (parsed.type === 'message_stop') {
+                reader.cancel(); // stream finished
+                break;
+              }
+            } else if (provider === 'Google') {
+              delta = parsed.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
             }
 
             if (delta) {
@@ -436,7 +441,11 @@ export const MCPClient = () => {
           m.id === streamingId ? { ...m, isStreaming: false } : m
         )
       );
-      providerMessagesRef.current.push({ role: 'assistant', content: fullText });
+      providerMessagesRef.current.push(
+        provider === 'Anthropic'
+          ? { role: 'assistant', content: [{ type: 'text', text: fullText }] }
+          : { role: 'assistant', content: fullText }
+      );
     } catch (error) {
       console.error('Streaming error:', error);
       setMessages(prev => prev.filter(m => m.id !== streamingId));
