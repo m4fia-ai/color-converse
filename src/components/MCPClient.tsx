@@ -970,7 +970,11 @@ export const MCPClient = () => {
               </div>
             )}
             
-            {messages.map((msg) => (
+            {messages.filter(msg => 
+              msg.content?.trim() || 
+              (msg.toolCalls && msg.toolCalls.length > 0) || 
+              msg.isStreaming
+            ).map((msg) => (
               <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
                   <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
