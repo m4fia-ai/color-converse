@@ -93,7 +93,9 @@ export const MCPClient = () => {
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
 
   // Provider settings
-  const [apiKey, setApiKey] = useState('');
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [anthropicApiKey, setAnthropicApiKey] = useState('');
+  const [googleApiKey, setGoogleApiKey] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<APIProvider>(API_PROVIDERS[0]);
   const [selectedModel, setSelectedModel] = useState('');
 
@@ -158,7 +160,9 @@ export const MCPClient = () => {
     const saved = localStorage.getItem('climaty-settings');
     if (saved) {
       const s = JSON.parse(saved);
-      setApiKey(s.apiKey ?? '');
+      setOpenaiApiKey(s.openaiApiKey ?? '');
+      setAnthropicApiKey(s.anthropicApiKey ?? '');
+      setGoogleApiKey(s.googleApiKey ?? '');
       const p = API_PROVIDERS.find(p => p.name === s.provider) ?? API_PROVIDERS[0];
       setSelectedProvider(p);
       setSelectedModel(s.model ?? p.models[0]);
@@ -247,10 +251,21 @@ export const MCPClient = () => {
     }
   };
 
+  // Helper function to get the appropriate API key
+  const getCurrentApiKey = () => {
+    switch (selectedProvider.name) {
+      case 'OpenAI': return openaiApiKey;
+      case 'Anthropic': return anthropicApiKey;
+      case 'Google': return googleApiKey;
+      default: return '';
+    }
+  };
+
   /* ────────────────────────── SEND MESSAGE ──────────────────────────── */
   const sendMessage = async () => {
     if ((!inputMessage.trim() && selectedImages.length === 0) || isLoading) return;
-    if (!apiKey) return toast({ title: 'Missing API key', variant: 'destructive' });
+    const currentApiKey = getCurrentApiKey();
+    if (!currentApiKey) return toast({ title: `Missing ${selectedProvider.name} API key`, variant: 'destructive' });
 
     // 1️⃣ Update UI & provider histories ---------------------------------
     const uiMsg: Message = {
@@ -289,7 +304,7 @@ export const MCPClient = () => {
 
       // Use proxy endpoints with streaming
       const body = {
-        apiKey,
+        apiKey: getCurrentApiKey(),
         model: selectedModel,
         messages: providerMessagesRef.current,
         maxTokens: 1000,
@@ -760,19 +775,41 @@ export const MCPClient = () => {
                   </Select>
                 </div>
                 <div>
-                  <Label htmlFor="apiKey">API Key</Label>
+                  <Label htmlFor="openaiApiKey">OpenAI API Key</Label>
                   <Input
-                    id="apiKey"
+                    id="openaiApiKey"
                     type="password"
-                    value={apiKey}
-                    onChange={e => setApiKey(e.target.value)}
-                    placeholder={`Enter ${selectedProvider.name} API key`}
+                    value={openaiApiKey}
+                    onChange={e => setOpenaiApiKey(e.target.value)}
+                    placeholder="Enter OpenAI API key"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="anthropicApiKey">Anthropic API Key</Label>
+                  <Input
+                    id="anthropicApiKey"
+                    type="password"
+                    value={anthropicApiKey}
+                    onChange={e => setAnthropicApiKey(e.target.value)}
+                    placeholder="Enter Anthropic API key"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="googleApiKey">Google API Key</Label>
+                  <Input
+                    id="googleApiKey"
+                    type="password"
+                    value={googleApiKey}
+                    onChange={e => setGoogleApiKey(e.target.value)}
+                    placeholder="Enter Google API key"
                   />
                 </div>
                 <Button 
                   onClick={() => {
                     localStorage.setItem('climaty-settings', JSON.stringify({
-                      apiKey, provider: selectedProvider.name, model: selectedModel
+                      openaiApiKey, anthropicApiKey, googleApiKey, 
+                      provider: selectedProvider.name, 
+                      model: selectedModel
                     }));
                     toast({ title: 'Settings saved' });
                   }}
