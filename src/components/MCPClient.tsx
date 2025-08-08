@@ -378,6 +378,7 @@ export const MCPClient = () => {
       .getReader();
 
     const streamingId = `stream-${crypto.randomUUID()}`;
+    console.log('🌊 Creating streaming placeholder message with id:', streamingId);
     setMessages(prev => [
       ...prev,
       { id: streamingId, role: 'assistant', content: '', timestamp: new Date(), isStreaming: true }
@@ -475,7 +476,7 @@ export const MCPClient = () => {
                     content: null,
                   });
                   
-                  if (fullText.trim()) appendAssistantMessage(fullText, toolCalls);
+                  appendAssistantMessage(fullText, toolCalls);
                   await executeToolCalls(toolCalls);
                   fullText = '';
                   accumulatedToolCalls = {}; // Reset for next set of tool calls
@@ -505,7 +506,7 @@ export const MCPClient = () => {
                   role: 'assistant',
                   content: [parsed],            // Claude's own shape
                 });
-                if (fullText.trim()) appendAssistantMessage(fullText, toolCalls);
+                appendAssistantMessage(fullText, toolCalls);
                 await executeToolCalls(toolCalls);
                 fullText = '';
               }
@@ -557,7 +558,8 @@ export const MCPClient = () => {
           args: JSON.parse(tc.function.arguments),
           status: 'pending'
         }));
-        // don't create a bubble yet; we'll add one after the tool runs
+        // Show tool calls in UI even without content
+        appendAssistantMessage('', toolCalls);
         await executeToolCalls(toolCalls);
       } else {
         appendAssistantMessage(msg.content ?? '');
@@ -581,8 +583,8 @@ export const MCPClient = () => {
       providerMessagesRef.current.push({ role: 'assistant', content: assistantMsgForProvider });
 
       if (toolCalls.length) {
-        // if the model already sent some text, keep it; otherwise wait
-        if (collectedText.trim()) appendAssistantMessage(collectedText, toolCalls);
+        // Always show tool calls, but only include text if there is some
+        appendAssistantMessage(collectedText, toolCalls);
         await executeToolCalls(toolCalls);
       } else {
         appendAssistantMessage(collectedText);
@@ -592,6 +594,7 @@ export const MCPClient = () => {
 
   /* ───────────────────────── APPEND UI MESSAGE ───────────────────────── */
   const appendAssistantMessage = (content: string, toolCalls?: ToolCall[]) => {
+    console.log('📝 appendAssistantMessage called:', { content, toolCalls, hasContent: !!content.trim() });
     setMessages(prev => [
       ...prev,
       { id: (Date.now() + Math.random()).toString(), role: 'assistant', content, toolCalls, timestamp: new Date() }
