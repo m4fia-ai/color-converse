@@ -301,7 +301,10 @@ export const MCPClient = () => {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          ...(provider !== 'Google' ? { 'Accept': 'text/event-stream' } : {})
+          ...(provider !== 'Google' ? { 
+            'Accept': 'text/event-stream',
+            'Accept-Encoding': 'identity'
+          } : {})
         },
         body: JSON.stringify(body)
       });
@@ -346,86 +349,72 @@ export const MCPClient = () => {
 
   /* ─────────────────── HANDLE STREAMING RESPONSE ──────────────────────── */
   const handleStreamingResponse = async (response: Response) => {
-    const provider = selectedProvider.name;
-    const reader = response.body?.getReader();
-    if (!reader) return;
+    const reader = response.body!
+      .pipeThrough(new TextDecoderStream())
+      .getReader();
 
-    let streamedContent = '';
-    
-    // Add initial streaming message placeholder
-    const streamingMessageId = `streaming-${Date.now()}`;
-    setMessages(prev => [...prev, {
-      id: streamingMessageId,
-      role: 'assistant' as const,
-      content: '',
-      timestamp: new Date(),
-      isStreaming: true
-    }]);
-    
+    const streamingId = `stream-${crypto.randomUUID()}`;
+    setMessages(prev => [
+      ...prev,
+      { id: streamingId, role: 'assistant', content: '', timestamp: new Date(), isStreaming: true }
+    ]);
+
+    let buffer = '';
+    let fullText = '';
+
     try {
-      const decoder = new TextDecoder();
-      
       while (true) {
-        const { done, value } = await reader.read();
+        const { value, done } = await reader.read();
         if (done) break;
+        buffer += value;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+        // Process every complete SSE event (ends with blank line)
+        let boundary;
+        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+          const raw = buffer.slice(0, boundary).trim();   // one event
+          buffer = buffer.slice(boundary + 2);            // rest of the stream
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          
-          // Handle Server-Sent Events format
-          if (!line.startsWith('data: ')) continue;
-          const dataStr = line.slice(6);
-          if (dataStr === '[DONE]') break;
+          if (!raw.startsWith('data:')) continue;
+          const data = raw.replace(/^data:\s*/, '');
+
+          if (data === '[DONE]') {
+            reader.cancel();
+            break;
+          }
 
           try {
-            const parsed = JSON.parse(dataStr);
-            
-            if (provider === 'OpenAI') {
-              const delta = parsed.choices?.[0]?.delta;
-              if (delta?.content) {
-                streamedContent += delta.content;
-                // Update immediately on each chunk
-                setMessages(prev => prev.map(msg => 
-                  msg.id === streamingMessageId 
-                    ? { ...msg, content: streamedContent }
-                    : msg
-                ));
-              }
-            } else if (provider === 'Anthropic') {
-              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-                streamedContent += parsed.delta.text;
-                // Update immediately on each chunk
-                setMessages(prev => prev.map(msg => 
-                  msg.id === streamingMessageId 
-                    ? { ...msg, content: streamedContent }
-                    : msg
-                ));
-              }
+            const parsed = JSON.parse(data);
+            // OpenAI       → parsed.choices[0].delta.content
+            // Anthropic    → parsed.delta.text
+            const delta =
+              parsed.choices?.[0]?.delta?.content ??
+              parsed.delta?.text ??
+              '';
+
+            if (delta) {
+              fullText += delta;
+              setMessages(prev =>
+                prev.map(m =>
+                  m.id === streamingId ? { ...m, content: fullText } : m
+                )
+              );
             }
-          } catch (e) {
-            // Skip malformed JSON
-            console.warn('Failed to parse SSE data:', dataStr);
+          } catch (err) {
+            console.warn('Bad SSE chunk', err, raw);
           }
         }
       }
-      
-      // Finalize the streamed message
-      setMessages(prev => prev.map(msg => 
-        msg.id === streamingMessageId 
-          ? { ...msg, content: streamedContent, isStreaming: false }
-          : msg
-      ));
-      
-      if (streamedContent) {
-        providerMessagesRef.current.push({ role: 'assistant', content: streamedContent });
-      }
+
+      // finalise message
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === streamingId ? { ...m, isStreaming: false } : m
+        )
+      );
+      providerMessagesRef.current.push({ role: 'assistant', content: fullText });
     } catch (error) {
       console.error('Streaming error:', error);
-      // Remove failed streaming message
-      setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
+      setMessages(prev => prev.filter(m => m.id !== streamingId));
       toast({ title: 'Streaming error', description: 'Connection interrupted', variant: 'destructive' });
     }
   };
