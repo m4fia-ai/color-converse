@@ -154,6 +154,73 @@ All colors MUST be HSL.
   }
 }
 
+/* Markdown Table Styles */
+.markdown-table table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  margin: 1rem 0;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  font-feature-settings: 'tnum';
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+
+.markdown-table th {
+  background-color: transparent;
+  font-weight: 600;
+  text-align: left;
+  padding: 1rem;
+  border: 1px solid hsl(0, 0%, 83%);
+  color: hsl(0, 0%, 15%);
+  letter-spacing: -0.01em;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.markdown-table th:first-child { border-top-left-radius: 0.75rem; }
+.markdown-table th:last-child { border-top-right-radius: 0.75rem; }
+.markdown-table tr:last-child td:first-child { border-bottom-left-radius: 0.75rem; }
+.markdown-table tr:last-child td:last-child { border-bottom-right-radius: 0.75rem; }
+
+.markdown-table td {
+  padding: 1rem;
+  border: 1px solid hsl(0, 0%, 83%);
+  vertical-align: middle;
+  color: hsl(0, 0%, 15%);
+  background-color: transparent;
+  font-size: 14px;
+  line-height: 1.5;
+  font-feature-settings: 'tnum';
+  font-variant-numeric: tabular-nums;
+}
+
+.markdown-table tr:hover td { background-color: rgba(0, 0, 0, 0.4); }
+
+.markdown-table p { margin: 0; font-size: 14px; line-height: 1.5; color: hsl(0, 0%, 15%); }
+
+/* Dark mode overrides */
+.dark .markdown-table table { background-color: rgba(0, 0, 0, 0.3); }
+.dark .markdown-table th { color: hsl(0, 0%, 90%); border-color: hsl(0, 0%, 32%); }
+.dark .markdown-table td { color: hsl(0, 0%, 90%); border-color: hsl(0, 0%, 32%); }
+.dark .markdown-table tr:hover td { background-color: rgba(0, 0, 0, 0.4); }
+.dark .markdown-table p { color: hsl(0, 0%, 90%); }
+
+/* Links, code, strong, etc. */
+.markdown-table strong { font-weight: 600; letter-spacing: -0.01em; }
+.markdown-table a { color: hsl(217, 91%, 60%); text-decoration: none; font-weight: 500; }
+.dark .markdown-table a { color: hsl(213, 94%, 68%); }
+.markdown-table code {
+  background-color: hsl(0, 0%, 83%);
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.25rem;
+  font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size: 14px;
+}
+.dark .markdown-table code { background-color: hsl(0, 0%, 32%); }
+
 @layer base {
   * {
     @apply border-border;
