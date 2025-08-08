@@ -54,18 +54,18 @@ interface APIProvider {
 const API_PROVIDERS: APIProvider[] = [
   {
     name: 'OpenAI',
-    baseUrl: '/functions/v1/openai-proxy',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo']
+    models: ['gpt-4o', 'gpt-4o-mini'],
+    baseUrl: 'https://api.openai.com/v1/chat/completions'
   },
   {
     name: 'Anthropic',
-    baseUrl: '/functions/v1/anthropic-proxy',
-    models: ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307','claude-sonnet-4-20250514', 'claude-opus-4-20250514']
+    models: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+    baseUrl: 'https://api.anthropic.com/v1/messages'
   },
   {
     name: 'Google',
-    baseUrl: '/functions/v1/google-proxy',
-    models: ['gemini-2.0-flash-exp', 'gemini-1.5-pro']
+    models: ['gemini-1.5-flash', 'gemini-1.5-pro'],
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/models'
   }
 ];
 
@@ -288,16 +288,54 @@ export const MCPClient = () => {
 
       // Use proxy endpoints
       const body = {
-        apiKey,
         model: selectedModel,
         messages: providerMessagesRef.current,
-        maxTokens: 1000,
+        max_tokens: 1000,
         tools
       };
 
+      let headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      if (provider === 'OpenAI') {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      } else if (provider === 'Anthropic') {
+        headers['x-api-key'] = apiKey;
+        headers['anthropic-version'] = '2023-06-01';
+        // Handle Anthropic format - separate system message
+        const systemMessage = providerMessagesRef.current.find(m => m.role === 'system')?.content || '';
+        const filteredMessages = providerMessagesRef.current.filter(m => m.role !== 'system');
+        body.messages = filteredMessages;
+        if (systemMessage) {
+          (body as any).system = systemMessage;
+        }
+      } else if (provider === 'Google') {
+        // Google uses API key in URL, different message format
+        const contents = [{
+          parts: [{
+            text: providerMessagesRef.current.map((m: any) => `${m.role}: ${m.content}`).join('\n\n')
+          }]
+        }];
+        const resp = await fetch(`${selectedProvider.baseUrl}/${selectedModel}:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents })
+        });
+        
+        if (!resp.ok) {
+          throw new Error(`Google API error ${resp.status}`);
+        }
+        
+        const data = await resp.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? 'No response';
+        appendAssistantMessage(text);
+        return;
+      }
+
       const resp = await fetch(selectedProvider.baseUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body)
       });
 
@@ -307,13 +345,6 @@ export const MCPClient = () => {
       }
 
       const data = await resp.json();
-
-      // Handle Google response format differently
-      if (provider === 'Google') {
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? 'No response';
-        appendAssistantMessage(text);
-        return;
-      }
 
       await handleLLMResponse(data);
     } catch (e: any) {
