@@ -368,11 +368,11 @@ export const MCPClient = () => {
         if (done) break;
         buffer += value;
 
-        // Process every complete SSE event (ends with blank line)
-        let boundary;
-        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
-          const raw = buffer.slice(0, boundary).trim();   // one event
-          buffer = buffer.slice(boundary + 2);            // rest of the stream
+    // Process every complete SSE event (ends with blank line)
+    let boundary;
+    while ((boundary = buffer.search(/\r?\n\r?\n/)) !== -1) {
+      const raw = buffer.slice(0, boundary).replace(/\r/g, '').trim();   // one event
+      buffer = buffer.slice(boundary + 2);            // rest of the stream
 
           if (!raw.startsWith('data:')) continue;
           const data = raw.replace(/^data:\s*/, '');
