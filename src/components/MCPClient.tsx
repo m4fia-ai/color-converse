@@ -475,7 +475,7 @@ export const MCPClient = () => {
                     content: null,
                   });
                   
-                  appendAssistantMessage(fullText, toolCalls);
+                  if (fullText.trim()) appendAssistantMessage(fullText, toolCalls);
                   await executeToolCalls(toolCalls);
                   fullText = '';
                   accumulatedToolCalls = {}; // Reset for next set of tool calls
@@ -505,7 +505,7 @@ export const MCPClient = () => {
                   role: 'assistant',
                   content: [parsed],            // Claude's own shape
                 });
-                appendAssistantMessage(fullText, toolCalls);
+                if (fullText.trim()) appendAssistantMessage(fullText, toolCalls);
                 await executeToolCalls(toolCalls);
                 fullText = '';
               }
@@ -557,7 +557,7 @@ export const MCPClient = () => {
           args: JSON.parse(tc.function.arguments),
           status: 'pending'
         }));
-        appendAssistantMessage('', toolCalls); // Show placeholder in UI
+        // don't create a bubble yet; we'll add one after the tool runs
         await executeToolCalls(toolCalls);
       } else {
         appendAssistantMessage(msg.content ?? '');
@@ -581,7 +581,8 @@ export const MCPClient = () => {
       providerMessagesRef.current.push({ role: 'assistant', content: assistantMsgForProvider });
 
       if (toolCalls.length) {
-        appendAssistantMessage(collectedText, toolCalls);
+        // if the model already sent some text, keep it; otherwise wait
+        if (collectedText.trim()) appendAssistantMessage(collectedText, toolCalls);
         await executeToolCalls(toolCalls);
       } else {
         appendAssistantMessage(collectedText);
