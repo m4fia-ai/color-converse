@@ -286,13 +286,14 @@ export const MCPClient = () => {
         );
       }
 
-      // Use proxy endpoints
+      // Use proxy endpoints with streaming
       const body = {
         apiKey,
         model: selectedModel,
         messages: providerMessagesRef.current,
         maxTokens: 1000,
-        tools
+        tools,
+        stream: true
       };
 
       const resp = await fetch(selectedProvider.baseUrl, {
@@ -304,6 +305,12 @@ export const MCPClient = () => {
       if (!resp.ok) {
         const errorData = await resp.json().catch(() => ({}));
         throw new Error(errorData.error || `${provider} API error ${resp.status}`);
+      }
+
+      // Handle streaming response
+      if (resp.headers.get('content-type')?.includes('text/event-stream')) {
+        await handleStreamingResponse(resp);
+        return;
       }
 
       const data = await resp.json();
@@ -322,6 +329,79 @@ export const MCPClient = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  /* ─────────────────── HANDLE STREAMING RESPONSE ──────────────────────── */
+  const handleStreamingResponse = async (response: Response) => {
+    const provider = selectedProvider.name;
+    const reader = response.body?.getReader();
+    if (!reader) return;
+
+    let streamedContent = '';
+    let currentMessageId = '';
+    
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = new TextDecoder().decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('data: ')) continue;
+          
+          try {
+            const data = JSON.parse(line.slice(6));
+            
+            if (provider === 'OpenAI') {
+              const delta = data.choices?.[0]?.delta;
+              if (delta?.content) {
+                streamedContent += delta.content;
+                updateStreamingMessage(streamedContent);
+              }
+            } else if (provider === 'Anthropic') {
+              if (data.type === 'content_block_delta' && data.delta?.text) {
+                streamedContent += data.delta.text;
+                updateStreamingMessage(streamedContent);
+              }
+            }
+          } catch (e) {
+            // Skip malformed JSON
+            continue;
+          }
+        }
+      }
+      
+      // Finalize the streamed message
+      if (streamedContent) {
+        providerMessagesRef.current.push({ role: 'assistant', content: streamedContent });
+      }
+    } catch (error) {
+      console.error('Streaming error:', error);
+      toast({ title: 'Streaming error', description: 'Connection interrupted', variant: 'destructive' });
+    }
+  };
+
+  /* Helper to update the streaming message in real-time */
+  const updateStreamingMessage = (content: string) => {
+    setMessages(prev => {
+      const lastMessage = prev[prev.length - 1];
+      if (lastMessage?.role === 'assistant' && lastMessage.content.endsWith('...')) {
+        // Update existing streaming message
+        return prev.map((msg, idx) => 
+          idx === prev.length - 1 ? { ...msg, content } : msg
+        );
+      } else {
+        // Add new streaming message
+        return [...prev, {
+          id: `streaming-${Date.now()}`,
+          role: 'assistant' as const,
+          content,
+          timestamp: new Date()
+        }];
+      }
+    });
   };
 
   /* ─────────────────── HANDLE FIRST ASSISTANT RESPONSE ───────────────── */

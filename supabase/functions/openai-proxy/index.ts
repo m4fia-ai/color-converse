@@ -13,7 +13,7 @@ serve(async (req) => {
   }
 
   try {
-    const { apiKey, model, messages, maxTokens = 1000, tools } = await req.json()
+    const { apiKey, model, messages, maxTokens = 1000, tools, stream = false } = await req.json()
 
     if (!apiKey) {
       return new Response(
@@ -25,7 +25,8 @@ serve(async (req) => {
     const body: any = {
       model,
       messages,
-      max_tokens: maxTokens
+      max_tokens: maxTokens,
+      stream
     };
 
     // Add tools if provided
@@ -49,6 +50,18 @@ serve(async (req) => {
         JSON.stringify({ error: `OpenAI API error: ${response.status}`, details: errorText }),
         { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
+    }
+
+    // Handle streaming response
+    if (stream) {
+      return new Response(response.body, {
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive'
+        }
+      })
     }
 
     const data = await response.json()

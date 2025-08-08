@@ -13,7 +13,7 @@ serve(async (req) => {
   }
 
   try {
-    const { apiKey, model, messages, maxTokens = 1000, tools } = await req.json()
+    const { apiKey, model, messages, maxTokens = 1000, tools, stream = false } = await req.json()
 
     if (!apiKey) {
       return new Response(
@@ -35,7 +35,8 @@ serve(async (req) => {
     const body: any = {
       model,
       max_tokens: maxTokens,
-      messages: filteredMessages
+      messages: filteredMessages,
+      stream
     };
 
     // Add system message if present
@@ -65,6 +66,18 @@ serve(async (req) => {
         JSON.stringify({ error: `Anthropic API error: ${response.status}`, details: errorText }),
         { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
+    }
+
+    // Handle streaming response
+    if (stream) {
+      return new Response(response.body, {
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive'
+        }
+      })
     }
 
     const data = await response.json()
