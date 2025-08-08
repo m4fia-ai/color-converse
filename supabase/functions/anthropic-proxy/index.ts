@@ -13,7 +13,9 @@ serve(async (req) => {
   }
 
   try {
-    const { apiKey, model, messages, maxTokens = 1000, tools, stream = false } = await req.json()
+    const { apiKey: apiKeyFromBody, model, messages, maxTokens = 1000, tools, stream = false } = await req.json()
+
+    const apiKey = apiKeyFromBody || Deno.env.get('ANTHROPIC_API_KEY');
 
     if (!apiKey) {
       return new Response(

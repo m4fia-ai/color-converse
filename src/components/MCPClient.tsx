@@ -299,21 +299,34 @@ export const MCPClient = () => {
 
       const resp = await fetch(selectedProvider.baseUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(provider !== 'Google' ? { 'Accept': 'text/event-stream' } : {})
+        },
         body: JSON.stringify(body)
       });
 
       if (!resp.ok) {
+        const ct = resp.headers.get('content-type') || 'unknown';
+        addLog('error', `LLM HTTP ${resp.status} (${ct})`);
         const errorData = await resp.json().catch(() => ({}));
         throw new Error(errorData.error || `${provider} API error ${resp.status}`);
       }
 
-      // Handle streaming response
-      if (resp.headers.get('content-type')?.includes('text/event-stream')) {
+      const ct = resp.headers.get('content-type') || '';
+      addLog('info', `LLM response content-type: ${ct}`);
+
+      // Handle streaming response (detect even if content-type is missing)
+      if (
+        provider !== 'Google' && (
+          ct.includes('text/event-stream') || (!ct.includes('application/json') && !!resp.body)
+        )
+      ) {
         await handleStreamingResponse(resp);
         return;
       }
 
+      // If not SSE, fall back to JSON path below
       const data = await resp.json();
 
       // Handle Google response format differently
@@ -363,29 +376,26 @@ export const MCPClient = () => {
           if (!line.trim()) continue;
           
           // Handle Server-Sent Events format
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') break;
-            
-            try {
-              const parsed = JSON.parse(data);
-              
-              if (provider === 'OpenAI') {
-                const delta = parsed.choices?.[0]?.delta;
-                if (delta?.content) {
-                  streamedContent += delta.content;
-                  updateStreamingMessage(streamingMessageId, streamedContent);
-                }
-              } else if (provider === 'Anthropic') {
-                if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-                  streamedContent += parsed.delta.text;
-                  updateStreamingMessage(streamingMessageId, streamedContent);
-                }
+          if (!line.startsWith('data: ')) continue;
+          const dataStr = line.slice(6);
+          if (dataStr === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(dataStr);
+            if (provider === 'OpenAI') {
+              const delta = parsed.choices?.[0]?.delta;
+              if (delta?.content) {
+                streamedContent += delta.content;
+                updateStreamingMessage(streamingMessageId, streamedContent);
               }
-            } catch (e) {
-              // Skip malformed JSON
-              continue;
+            } else if (provider === 'Anthropic') {
+              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                streamedContent += parsed.delta.text;
+                updateStreamingMessage(streamingMessageId, streamedContent);
+              }
             }
+          } catch (_) {
+            // Non-JSON data line; ignore
           }
         }
       }

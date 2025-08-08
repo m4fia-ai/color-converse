@@ -13,7 +13,9 @@ serve(async (req) => {
   }
 
   try {
-    const { apiKey, model, messages } = await req.json()
+    const { apiKey: apiKeyFromBody, model, messages } = await req.json()
+
+    const apiKey = apiKeyFromBody || Deno.env.get('GOOGLE_API_KEY');
 
     if (!apiKey) {
       return new Response(
