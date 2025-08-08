@@ -54,17 +54,17 @@ interface APIProvider {
 const API_PROVIDERS: APIProvider[] = [
   {
     name: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
+    baseUrl: '/functions/v1/openai-proxy',
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo']
   },
   {
     name: 'Anthropic',
-    baseUrl: 'https://api.anthropic.com/v1',
-    models: ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307','claude-sonnet-4-20250514', 'claude-opus-4-1-20250805']
+    baseUrl: '/functions/v1/anthropic-proxy',
+    models: ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307','claude-sonnet-4-20250514', 'claude-opus-4-20250514']
   },
   {
     name: 'Google',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    baseUrl: '/functions/v1/google-proxy',
     models: ['gemini-2.0-flash-exp', 'gemini-1.5-pro']
   }
 ];
@@ -275,47 +275,46 @@ export const MCPClient = () => {
   const callLLM = async () => {
     setIsLoading(true);
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      let body: any;
       const provider = selectedProvider.name;
 
-      if (provider === 'OpenAI') {
-        headers['Authorization'] = `Bearer ${apiKey}`;
-        body = { model: selectedModel, messages: providerMessagesRef.current, max_tokens: 1000 };
-      } else if (provider === 'Anthropic') {
-        headers['x-api-key'] = apiKey;
-        headers['anthropic-version'] = '2023-06-01';
-        body = { model: selectedModel, max_tokens: 1000, messages: providerMessagesRef.current };
-      } else {
-        // Google Gemini
-        const resp = await fetch(`${selectedProvider.baseUrl}/models/${selectedModel}:generateContent?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: providerMessagesRef.current.map(m => m.content).join('\n\n') }] }]
-          })
-        });
-        if (!resp.ok) throw new Error(`Gemini error ${resp.status}`);
-        const j = await resp.json();
-        const text = j.candidates?.[0]?.content?.parts?.[0]?.text ?? 'No response';
+      // Prepare tools payload if available
+      let tools: any[] | undefined;
+      if (mcpTools.length && isConnected) {
+        tools = mcpTools.map(t => provider === 'OpenAI'
+          ? { type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema ?? {} } }
+          : { name: t.name, description: t.description, input_schema: t.inputSchema ?? {} }
+        );
+      }
+
+      // Use proxy endpoints
+      const body = {
+        apiKey,
+        model: selectedModel,
+        messages: providerMessagesRef.current,
+        maxTokens: 1000,
+        tools
+      };
+
+      const resp = await fetch(selectedProvider.baseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!resp.ok) {
+        const errorData = await resp.json().catch(() => ({}));
+        throw new Error(errorData.error || `${provider} API error ${resp.status}`);
+      }
+
+      const data = await resp.json();
+
+      // Handle Google response format differently
+      if (provider === 'Google') {
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? 'No response';
         appendAssistantMessage(text);
         return;
       }
 
-      // Add tools if available (OpenAI & Anthropic only)
-      if (mcpTools.length && isConnected) {
-        const toolsPayload = mcpTools.map(t => provider === 'OpenAI'
-          ? { type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema ?? {} } }
-          : { name: t.name, description: t.description, input_schema: t.inputSchema ?? {} }
-        );
-        body.tools = toolsPayload;
-        body.tool_choice = 'auto';
-      }
-
-      const endpoint = selectedProvider.baseUrl + (provider === 'Anthropic' ? '/messages' : '/chat/completions');
-      const resp = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (!resp.ok) throw new Error(`${provider} API error ${resp.status}`);
-      const data = await resp.json();
       await handleLLMResponse(data);
     } catch (e: any) {
       toast({ title: 'LLM Error', description: e.message ?? String(e), variant: 'destructive' });
