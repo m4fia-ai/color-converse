@@ -285,21 +285,7 @@ export const MCPClient = () => {
       } else if (provider === 'Anthropic') {
         headers['x-api-key'] = apiKey;
         headers['anthropic-version'] = '2023-06-01';
-        
-        // Filter out system messages and handle them separately for Anthropic
-        const systemMsg = providerMessagesRef.current.find(m => m.role === 'system');
-        const userMessages = providerMessagesRef.current.filter(m => m.role !== 'system');
-        
-        body = { 
-          model: selectedModel, 
-          max_tokens: 1000, 
-          messages: userMessages
-        };
-        
-        // Add system prompt if present
-        if (systemMsg) {
-          body.system = systemMsg.content;
-        }
+        body = { model: selectedModel, max_tokens: 1000, messages: providerMessagesRef.current };
       } else {
         // Google Gemini
         const resp = await fetch(`${selectedProvider.baseUrl}/models/${selectedModel}:generateContent?key=${apiKey}`, {
