@@ -303,7 +303,7 @@ export const MCPClient = () => {
       }
 
       // Use proxy endpoints with streaming
-      const body = {
+      const body: any = {
         apiKey: getCurrentApiKey(),
         model: selectedModel,
         messages: providerMessagesRef.current,
@@ -311,6 +311,13 @@ export const MCPClient = () => {
         tools,
         stream: true
       };
+
+      // Add input token caching for Claude
+      if (provider === 'Anthropic') {
+        body.extra_headers = {
+          "anthropic-beta": "prompt-caching-2024-07-31"
+        };
+      }
 
       // Quick fix: turn streaming off whenever tools are in play
       if (provider === 'OpenAI' && tools?.length) {
