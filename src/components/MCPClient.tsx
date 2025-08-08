@@ -323,7 +323,7 @@ export const MCPClient = () => {
       const shouldStream = provider !== 'Google' && body.stream === true;
       
       if (shouldStream) {
-        addLog('info', 'Attempting to handle as streaming response');
+        addLog('info', 'Attempting to handle as streaming response', resp);
         await handleStreamingResponse(resp);
         return;
       }
@@ -369,15 +369,10 @@ export const MCPClient = () => {
         buffer += value;
 
     // Process every complete SSE event (ends with blank line)
-    let match;
-    const EVENT_BOUNDARY = /\r?\n\r?\n/; 
-    while ((match = buffer.match(EVENT_BOUNDARY)) !== null) {
-      const boundaryIndex = match.index!;  
-      const boundaryLen   = match[0].length; // 2 or 4
-      const raw   = buffer.slice(0, boundaryIndex).replace(/\r/g, '').trim();
-      buffer      = buffer.slice(boundaryIndex + boundaryLen);
-
-
+    let boundary;
+    while ((boundary = buffer.search(/\r?\n\r?\n/)) !== -1) {
+      const raw = buffer.slice(0, boundary).replace(/\r/g, '').trim();   // one event
+      buffer = buffer.slice(boundary + 2);            // rest of the stream
 
           if (!raw.startsWith('data:')) continue;
           const data = raw.replace(/^data:\s*/, '');
