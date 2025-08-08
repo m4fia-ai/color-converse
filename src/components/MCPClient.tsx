@@ -319,13 +319,7 @@ export const MCPClient = () => {
         };
       }
 
-      // Quick fix: turn streaming off whenever tools are in play
-      if (provider === 'OpenAI' && tools?.length) {
-        body.stream = false;          // let it return a normal JSON
-      }
-      if (provider === 'Anthropic' && tools?.length) {
-        body.stream = false;          // Claude sends tool_use objects too
-      }
+      // Now streaming works with tools, so we can keep it enabled
 
       const resp = await fetch(selectedProvider.baseUrl, {
         method: 'POST',
@@ -354,8 +348,7 @@ export const MCPClient = () => {
       
       if (shouldStream) {
         addLog('info', 'Attempting to handle as streaming response');
-        addLog('info', JSON.stringify(resp))
-        await handleStreamingResponse(resp, provider);
+        await handleStreamingResponse(resp, provider);   // ⇠ NEW ARG
         return;
       }
 
@@ -405,11 +398,12 @@ export const MCPClient = () => {
       const raw = buffer.slice(0, boundary).replace(/\r/g, '').trim();   // one event
       buffer = buffer.slice(boundary + 2);            // rest of the stream
 
-          // Anthropic adds an "event:" header before "data:"
+          // Anthropic puts "event:" before "data:", OpenAI doesn't.
           const dataLine = raw.split('\n').find(l => l.startsWith('data:'));
           if (!dataLine) continue;
           const data = dataLine.replace(/^data:\s*/, '');
 
+          // OpenAI terminator; Anthropic ends with event: message_stop
           if (data === '[DONE]') {
             reader.cancel();
             break;
@@ -417,32 +411,70 @@ export const MCPClient = () => {
 
           try {
             const parsed = JSON.parse(data);
-            console.log('SSE Event:', parsed);
             
-            // Handle different provider formats
-            let delta = '';
-            
+            /* ------------- OPENAI ------------- */
             if (provider === 'OpenAI') {
-              delta = parsed.choices?.[0]?.delta?.content ?? '';
-            } else if (provider === 'Anthropic') {
-              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-                delta = parsed.delta.text;
+              /* text tokens */
+              const deltaTxt = parsed.choices?.[0]?.delta?.content;
+              if (deltaTxt) {
+                fullText += deltaTxt;
+                setMessages(prev =>
+                  prev.map(m =>
+                    m.id === streamingId ? { ...m, content: fullText } : m
+                  )
+                );
               }
-              if (parsed.type === 'message_stop') {
-                reader.cancel(); // stream finished
-                break;
+              /* tool calls */
+              const tcArr = parsed.choices?.[0]?.delta?.tool_calls;
+              if (tcArr) {
+                const toolCalls: ToolCall[] = tcArr.map((tc: any) => ({
+                  id: tc.id,
+                  name: tc.function.name,
+                  args: JSON.parse(tc.function.arguments),
+                  status: 'pending',
+                }));
+                providerMessagesRef.current.push({
+                  role: 'assistant',
+                  tool_calls: tcArr,
+                  content: null,
+                });
+                appendAssistantMessage(fullText, toolCalls);
+                await executeToolCalls(toolCalls);
+                fullText = '';                    // reset for post-tool text
               }
-            } else if (provider === 'Google') {
-              delta = parsed.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
             }
 
-            if (delta) {
-              fullText += delta;
-              setMessages(prev =>
-                prev.map(m =>
-                  m.id === streamingId ? { ...m, content: fullText } : m
-                )
-              );
+            /* ------------- ANTHROPIC ------------- */
+            if (provider === 'Anthropic') {
+              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                fullText += parsed.delta.text;
+                setMessages(prev =>
+                  prev.map(m =>
+                    m.id === streamingId ? { ...m, content: fullText } : m
+                  )
+                );
+              }
+
+              if (parsed.type === 'tool_use') {
+                const toolCalls: ToolCall[] = [{
+                  id: parsed.id,
+                  name: parsed.name,
+                  args: parsed.input,
+                  status: 'pending',
+                }];
+                providerMessagesRef.current.push({
+                  role: 'assistant',
+                  content: [parsed],            // Claude's own shape
+                });
+                appendAssistantMessage(fullText, toolCalls);
+                await executeToolCalls(toolCalls);
+                fullText = '';
+              }
+
+              if (parsed.type === 'message_stop') {
+                reader.cancel();
+                break;
+              }
             }
           } catch (err) {
             console.warn('Bad SSE chunk', err, raw);
