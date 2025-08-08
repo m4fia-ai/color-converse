@@ -314,19 +314,18 @@ export const MCPClient = () => {
       }
 
       const ct = resp.headers.get('content-type') || '';
-      addLog('info', `LLM response content-type: ${ct}`);
+      addLog('info', `LLM response content-type: ${ct}, status: ${resp.status}`);
 
-      // Handle streaming response (detect even if content-type is missing)
-      if (
-        provider !== 'Google' && (
-          ct.includes('text/event-stream') || (!ct.includes('application/json') && !!resp.body)
-        )
-      ) {
+      // Force streaming for OpenAI/Anthropic when stream=true was sent
+      const shouldStream = provider !== 'Google' && body.stream === true;
+      
+      if (shouldStream) {
+        addLog('info', 'Attempting to handle as streaming response');
         await handleStreamingResponse(resp);
         return;
       }
 
-      // If not SSE, fall back to JSON path below
+      // Fallback to non-streaming
       const data = await resp.json();
 
       // Handle Google response format differently
@@ -352,7 +351,6 @@ export const MCPClient = () => {
     if (!reader) return;
 
     let streamedContent = '';
-    let isStreaming = false;
     
     // Add initial streaming message placeholder
     const streamingMessageId = `streaming-${Date.now()}`;
@@ -365,11 +363,13 @@ export const MCPClient = () => {
     }]);
     
     try {
+      const decoder = new TextDecoder();
+      
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = new TextDecoder().decode(value);
+        const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split('\n');
 
         for (const line of lines) {
@@ -378,35 +378,48 @@ export const MCPClient = () => {
           // Handle Server-Sent Events format
           if (!line.startsWith('data: ')) continue;
           const dataStr = line.slice(6);
-          if (dataStr === '[DONE]') continue;
+          if (dataStr === '[DONE]') break;
 
           try {
             const parsed = JSON.parse(dataStr);
+            
             if (provider === 'OpenAI') {
               const delta = parsed.choices?.[0]?.delta;
               if (delta?.content) {
                 streamedContent += delta.content;
-                updateStreamingMessage(streamingMessageId, streamedContent);
+                // Update immediately on each chunk
+                setMessages(prev => prev.map(msg => 
+                  msg.id === streamingMessageId 
+                    ? { ...msg, content: streamedContent }
+                    : msg
+                ));
               }
             } else if (provider === 'Anthropic') {
               if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
                 streamedContent += parsed.delta.text;
-                updateStreamingMessage(streamingMessageId, streamedContent);
+                // Update immediately on each chunk
+                setMessages(prev => prev.map(msg => 
+                  msg.id === streamingMessageId 
+                    ? { ...msg, content: streamedContent }
+                    : msg
+                ));
               }
             }
-          } catch (_) {
-            // Non-JSON data line; ignore
+          } catch (e) {
+            // Skip malformed JSON
+            console.warn('Failed to parse SSE data:', dataStr);
           }
         }
       }
       
       // Finalize the streamed message
+      setMessages(prev => prev.map(msg => 
+        msg.id === streamingMessageId 
+          ? { ...msg, content: streamedContent, isStreaming: false }
+          : msg
+      ));
+      
       if (streamedContent) {
-        setMessages(prev => prev.map(msg => 
-          msg.id === streamingMessageId 
-            ? { ...msg, content: streamedContent, isStreaming: false }
-            : msg
-        ));
         providerMessagesRef.current.push({ role: 'assistant', content: streamedContent });
       }
     } catch (error) {
@@ -417,14 +430,6 @@ export const MCPClient = () => {
     }
   };
 
-  /* Helper to update the streaming message in real-time */
-  const updateStreamingMessage = (messageId: string, content: string) => {
-    setMessages(prev => prev.map(msg => 
-      msg.id === messageId 
-        ? { ...msg, content }
-        : msg
-    ));
-  };
 
   /* ─────────────────── HANDLE FIRST ASSISTANT RESPONSE ───────────────── */
   const handleLLMResponse = async (data: any) => {
