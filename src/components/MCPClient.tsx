@@ -312,6 +312,14 @@ export const MCPClient = () => {
         stream: true
       };
 
+      // Quick fix: turn streaming off whenever tools are in play
+      if (provider === 'OpenAI' && tools?.length) {
+        body.stream = false;          // let it return a normal JSON
+      }
+      if (provider === 'Anthropic' && tools?.length) {
+        body.stream = false;          // Claude sends tool_use objects too
+      }
+
       const resp = await fetch(selectedProvider.baseUrl, {
         method: 'POST',
         headers: { 
