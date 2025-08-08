@@ -400,12 +400,21 @@ export const MCPClient = () => {
 
           try {
             const parsed = JSON.parse(data);
-            // OpenAI       → parsed.choices[0].delta.content
-            // Anthropic    → parsed.delta.text (for content_block_delta events)
-            const delta =
-              parsed.choices?.[0]?.delta?.content ??
-              (parsed.type === 'content_block_delta' ? parsed.delta?.text : '') ??
-              '';
+            console.log('SSE Event:', parsed);
+            
+            // Handle different provider formats
+            let delta = '';
+            
+            if (parsed.choices?.[0]?.delta?.content) {
+              // OpenAI format
+              delta = parsed.choices[0].delta.content;
+            } else if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+              // Anthropic format: content_block_delta with text_delta
+              delta = parsed.delta.text;
+            } else if (parsed.candidates?.[0]?.content?.parts?.[0]?.text) {
+              // Google format
+              delta = parsed.candidates[0].content.parts[0].text;
+            }
 
             if (delta) {
               fullText += delta;
