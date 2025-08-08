@@ -385,10 +385,10 @@ export const MCPClient = () => {
           try {
             const parsed = JSON.parse(data);
             // OpenAI       → parsed.choices[0].delta.content
-            // Anthropic    → parsed.delta.text
+            // Anthropic    → parsed.delta.text (for content_block_delta events)
             const delta =
               parsed.choices?.[0]?.delta?.content ??
-              parsed.delta?.text ??
+              (parsed.type === 'content_block_delta' ? parsed.delta?.text : '') ??
               '';
 
             if (delta) {
