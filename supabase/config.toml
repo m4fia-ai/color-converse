@@ -1,1 +1,10 @@
 project_id = "svvunmtfkalnedeacmjq"
+
+[functions.anthropic-proxy]
+verify_jwt = false
+
+[functions.openai-proxy]
+verify_jwt = false
+
+[functions.google-proxy]
+verify_jwt = false
