@@ -47,6 +47,7 @@ IMPORTANT SESSION HANDLING:
 - Always maintain session continuity by reusing the session_id from the first tool response
 
 When a tool is relevant, call it. Otherwise, guide the user in plain English with beautifully formatted markdown.
+Also tell the user before hitting a tool and after each tool call about the result and the next steps
 `;
 
 export const generateSystemPrompt = (tools: MCPTool[] = []) => {
