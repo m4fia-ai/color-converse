@@ -174,7 +174,7 @@ All colors MUST be HSL.
   text-align: left;
   padding: 1rem;
   border: 1px solid hsl(0, 0%, 83%);
-  color: hsl(0, 0%, 15%);
+  color: hsl(0, 0%, 95%);
   letter-spacing: -0.01em;
   line-height: 1.5;
   font-size: 14px;
@@ -189,7 +189,7 @@ All colors MUST be HSL.
   padding: 1rem;
   border: 1px solid hsl(0, 0%, 83%);
   vertical-align: middle;
-  color: hsl(0, 0%, 15%);
+  color: hsl(0, 0%, 95%);
   background-color: transparent;
   font-size: 14px;
   line-height: 1.5;
@@ -199,7 +199,7 @@ All colors MUST be HSL.
 
 .markdown-table tr:hover td { background-color: rgba(0, 0, 0, 0.4); }
 
-.markdown-table p { margin: 0; font-size: 14px; line-height: 1.5; color: hsl(0, 0%, 15%); }
+.markdown-table p { margin: 0; font-size: 14px; line-height: 1.5; color: hsl(0, 0%, 95%); }
 
 /* Dark mode overrides */
 .dark .markdown-table table { background-color: rgba(0, 0, 0, 0.3); }
