@@ -155,6 +155,20 @@ All colors MUST be HSL.
 }
 
 /* Markdown Table Styles */
+/* User message tables - darker text */
+.bg-primary .markdown-table th {
+  color: hsl(0, 0%, 15%);
+}
+
+.bg-primary .markdown-table td {
+  color: hsl(0, 0%, 15%);
+}
+
+.bg-primary .markdown-table p {
+  color: hsl(0, 0%, 15%);
+}
+
+/* AI message tables - bright text */
 .markdown-table table {
   border-collapse: separate;
   border-spacing: 0;
