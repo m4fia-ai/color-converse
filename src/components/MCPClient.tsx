@@ -385,6 +385,7 @@ export const MCPClient = () => {
 
     let buffer = '';
     let fullText = '';
+    let accumulatedToolCalls: any = {}; // Accumulate tool call data for OpenAI
 
     try {
       while (true) {
@@ -424,23 +425,61 @@ export const MCPClient = () => {
                   )
                 );
               }
-              /* tool calls */
+              /* tool calls - accumulate incremental data */
               const tcArr = parsed.choices?.[0]?.delta?.tool_calls;
               if (tcArr) {
-                const toolCalls: ToolCall[] = tcArr.map((tc: any) => ({
-                  id: tc.id,
-                  name: tc.function.name,
-                  args: JSON.parse(tc.function.arguments),
-                  status: 'pending',
-                }));
-                providerMessagesRef.current.push({
-                  role: 'assistant',
-                  tool_calls: tcArr,
-                  content: null,
+                tcArr.forEach((tc: any) => {
+                  if (!accumulatedToolCalls[tc.index]) {
+                    accumulatedToolCalls[tc.index] = {
+                      id: tc.id || '',
+                      type: tc.type || 'function',
+                      function: {
+                        name: tc.function?.name || '',
+                        arguments: tc.function?.arguments || ''
+                      }
+                    };
+                  } else {
+                    // Accumulate arguments incrementally
+                    if (tc.function?.arguments) {
+                      accumulatedToolCalls[tc.index].function.arguments += tc.function.arguments;
+                    }
+                    if (tc.function?.name) {
+                      accumulatedToolCalls[tc.index].function.name = tc.function.name;
+                    }
+                    if (tc.id) {
+                      accumulatedToolCalls[tc.index].id = tc.id;
+                    }
+                  }
                 });
-                appendAssistantMessage(fullText, toolCalls);
-                await executeToolCalls(toolCalls);
-                fullText = '';                    // reset for post-tool text
+
+                // Check if we have complete tool calls with valid JSON arguments
+                const completeToolCalls = Object.values(accumulatedToolCalls).filter((tc: any) => {
+                  try {
+                    return tc.function.name && tc.function.arguments && JSON.parse(tc.function.arguments);
+                  } catch {
+                    return false;
+                  }
+                });
+
+                if (completeToolCalls.length > 0) {
+                  const toolCalls: ToolCall[] = completeToolCalls.map((tc: any) => ({
+                    id: tc.id,
+                    name: tc.function.name,
+                    args: JSON.parse(tc.function.arguments),
+                    status: 'pending',
+                  }));
+                  
+                  providerMessagesRef.current.push({
+                    role: 'assistant',
+                    tool_calls: completeToolCalls,
+                    content: null,
+                  });
+                  
+                  appendAssistantMessage(fullText, toolCalls);
+                  await executeToolCalls(toolCalls);
+                  fullText = '';
+                  accumulatedToolCalls = {}; // Reset for next set of tool calls
+                }
               }
             }
 
