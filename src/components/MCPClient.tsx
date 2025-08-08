@@ -323,7 +323,7 @@ export const MCPClient = () => {
       const shouldStream = provider !== 'Google' && body.stream === true;
       
       if (shouldStream) {
-        addLog('info', 'Attempting to handle as streaming response');
+        addLog('info', resp);
         await handleStreamingResponse(resp);
         return;
       }
