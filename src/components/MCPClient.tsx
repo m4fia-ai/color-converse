@@ -378,12 +378,9 @@ export const MCPClient = () => {
       .getReader();
 
     const streamingId = `stream-${crypto.randomUUID()}`;
-    console.log('🌊 Creating streaming placeholder message with id:', streamingId);
-    setMessages(prev => [
-      ...prev,
-      { id: streamingId, role: 'assistant', content: '', timestamp: new Date(), isStreaming: true }
-    ]);
-
+    console.log('🌊 Will create streaming message when content arrives, id:', streamingId);
+    
+    let messageCreated = false;
     let buffer = '';
     let fullText = '';
     let accumulatedToolCalls: any = {}; // Accumulate tool call data for OpenAI
@@ -420,11 +417,22 @@ export const MCPClient = () => {
               const deltaTxt = parsed.choices?.[0]?.delta?.content;
               if (deltaTxt) {
                 fullText += deltaTxt;
-                setMessages(prev =>
-                  prev.map(m =>
-                    m.id === streamingId ? { ...m, content: fullText } : m
-                  )
-                );
+                
+                // Create message only when we have content
+                if (!messageCreated) {
+                  console.log('🌊 Creating streaming message with first content');
+                  setMessages(prev => [
+                    ...prev,
+                    { id: streamingId, role: 'assistant', content: fullText, timestamp: new Date(), isStreaming: true }
+                  ]);
+                  messageCreated = true;
+                } else {
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === streamingId ? { ...m, content: fullText } : m
+                    )
+                  );
+                }
               }
               /* tool calls - accumulate incremental data */
               const tcArr = parsed.choices?.[0]?.delta?.tool_calls;
@@ -476,7 +484,18 @@ export const MCPClient = () => {
                     content: null,
                   });
                   
-                  appendAssistantMessage(fullText, toolCalls);
+                  // Only create message if there's content or we haven't created one yet
+                  if (fullText.trim() || !messageCreated) {
+                    appendAssistantMessage(fullText, toolCalls);
+                    messageCreated = true;
+                  } else {
+                    // Update existing message with tool calls
+                    setMessages(prev =>
+                      prev.map(m =>
+                        m.id === streamingId ? { ...m, toolCalls } : m
+                      )
+                    );
+                  }
                   await executeToolCalls(toolCalls);
                   fullText = '';
                   accumulatedToolCalls = {}; // Reset for next set of tool calls
@@ -488,11 +507,22 @@ export const MCPClient = () => {
             if (provider === 'Anthropic') {
               if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
                 fullText += parsed.delta.text;
-                setMessages(prev =>
-                  prev.map(m =>
-                    m.id === streamingId ? { ...m, content: fullText } : m
-                  )
-                );
+                
+                // Create message only when we have content
+                if (!messageCreated) {
+                  console.log('🌊 Creating streaming message with first content (Anthropic)');
+                  setMessages(prev => [
+                    ...prev,
+                    { id: streamingId, role: 'assistant', content: fullText, timestamp: new Date(), isStreaming: true }
+                  ]);
+                  messageCreated = true;
+                } else {
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === streamingId ? { ...m, content: fullText } : m
+                    )
+                  );
+                }
               }
 
               if (parsed.type === 'tool_use') {
@@ -506,7 +536,18 @@ export const MCPClient = () => {
                   role: 'assistant',
                   content: [parsed],            // Claude's own shape
                 });
-                appendAssistantMessage(fullText, toolCalls);
+                // Only create message if there's content or we haven't created one yet
+                if (fullText.trim() || !messageCreated) {
+                  appendAssistantMessage(fullText, toolCalls);
+                  messageCreated = true;
+                } else {
+                  // Update existing message with tool calls
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === streamingId ? { ...m, toolCalls } : m
+                    )
+                  );
+                }
                 await executeToolCalls(toolCalls);
                 fullText = '';
               }
