@@ -60,7 +60,7 @@ const API_PROVIDERS: APIProvider[] = [
   {
     name: 'Anthropic',
     baseUrl: 'https://api.anthropic.com/v1',
-    models: ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307']
+    models: ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307','claude-sonnet-4-20250514', 'claude-opus-4-1-20250805']
   },
   {
     name: 'Google',
