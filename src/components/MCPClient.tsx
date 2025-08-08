@@ -37,6 +37,7 @@ interface Message {
   images?: string[];
   toolCalls?: ToolCall[];
   timestamp: Date;
+  isStreaming?: boolean;
 }
 
 interface ConnectionLog {
@@ -338,7 +339,17 @@ export const MCPClient = () => {
     if (!reader) return;
 
     let streamedContent = '';
-    let currentMessageId = '';
+    let isStreaming = false;
+    
+    // Add initial streaming message placeholder
+    const streamingMessageId = `streaming-${Date.now()}`;
+    setMessages(prev => [...prev, {
+      id: streamingMessageId,
+      role: 'assistant' as const,
+      content: '',
+      timestamp: new Date(),
+      isStreaming: true
+    }]);
     
     try {
       while (true) {
@@ -349,59 +360,60 @@ export const MCPClient = () => {
         const lines = chunk.split('\n');
 
         for (const line of lines) {
-          if (!line.trim() || !line.startsWith('data: ')) continue;
+          if (!line.trim()) continue;
           
-          try {
-            const data = JSON.parse(line.slice(6));
+          // Handle Server-Sent Events format
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') break;
             
-            if (provider === 'OpenAI') {
-              const delta = data.choices?.[0]?.delta;
-              if (delta?.content) {
-                streamedContent += delta.content;
-                updateStreamingMessage(streamedContent);
+            try {
+              const parsed = JSON.parse(data);
+              
+              if (provider === 'OpenAI') {
+                const delta = parsed.choices?.[0]?.delta;
+                if (delta?.content) {
+                  streamedContent += delta.content;
+                  updateStreamingMessage(streamingMessageId, streamedContent);
+                }
+              } else if (provider === 'Anthropic') {
+                if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                  streamedContent += parsed.delta.text;
+                  updateStreamingMessage(streamingMessageId, streamedContent);
+                }
               }
-            } else if (provider === 'Anthropic') {
-              if (data.type === 'content_block_delta' && data.delta?.text) {
-                streamedContent += data.delta.text;
-                updateStreamingMessage(streamedContent);
-              }
+            } catch (e) {
+              // Skip malformed JSON
+              continue;
             }
-          } catch (e) {
-            // Skip malformed JSON
-            continue;
           }
         }
       }
       
       // Finalize the streamed message
       if (streamedContent) {
+        setMessages(prev => prev.map(msg => 
+          msg.id === streamingMessageId 
+            ? { ...msg, content: streamedContent, isStreaming: false }
+            : msg
+        ));
         providerMessagesRef.current.push({ role: 'assistant', content: streamedContent });
       }
     } catch (error) {
       console.error('Streaming error:', error);
+      // Remove failed streaming message
+      setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
       toast({ title: 'Streaming error', description: 'Connection interrupted', variant: 'destructive' });
     }
   };
 
   /* Helper to update the streaming message in real-time */
-  const updateStreamingMessage = (content: string) => {
-    setMessages(prev => {
-      const lastMessage = prev[prev.length - 1];
-      if (lastMessage?.role === 'assistant' && lastMessage.content.endsWith('...')) {
-        // Update existing streaming message
-        return prev.map((msg, idx) => 
-          idx === prev.length - 1 ? { ...msg, content } : msg
-        );
-      } else {
-        // Add new streaming message
-        return [...prev, {
-          id: `streaming-${Date.now()}`,
-          role: 'assistant' as const,
-          content,
-          timestamp: new Date()
-        }];
-      }
-    });
+  const updateStreamingMessage = (messageId: string, content: string) => {
+    setMessages(prev => prev.map(msg => 
+      msg.id === messageId 
+        ? { ...msg, content }
+        : msg
+    ));
   };
 
   /* ─────────────────── HANDLE FIRST ASSISTANT RESPONSE ───────────────── */
