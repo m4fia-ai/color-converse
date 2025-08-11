@@ -647,24 +647,7 @@ export const MCPClient = () => {
     ]);
   };
 
-  const updateToolCallIndicator = (toolName: string, status: 'pre-call' | 'calling' | 'success' | 'error', duration?: number) => {
-    setMessages(prev => 
-      prev.map(msg => {
-        if (msg.toolCalls?.some(tc => tc.name === toolName)) {
-          // Update the tool call status in the existing message
-          const updatedToolCalls = msg.toolCalls?.map(tc => 
-            tc.name === toolName ? { 
-              ...tc, 
-              status: status === 'pre-call' || status === 'calling' ? 'pending' as const : status as 'success' | 'error', 
-              endTime: status === 'success' || status === 'error' ? new Date() : tc.endTime 
-            } : tc
-          );
-          return { ...msg, toolCalls: updatedToolCalls };
-        }
-        return msg;
-      })
-    );
-  };
+  // Remove this function as it was causing empty message boxes
 
   const appendCampaignSummary = (items: any[]) => {
     setMessages(prev => [
@@ -733,18 +716,14 @@ export const MCPClient = () => {
   const executeToolCalls = async (toolCalls: ToolCall[]) => {
     const provider = selectedProvider.name;
 
-    // Show pre-call indicators
-    toolCalls.forEach(tc => {
-      updateToolCallIndicator(tc.name, 'pre-call');
-    });
+    // Tool call indicators are handled by the ToolCallIndicator component
 
     for (const tc of toolCalls) {
       setActiveToolCall(tc.id);
       updateToolCallStatus(tc.id, 'pending');
       tc.startTime = new Date();
       
-      // Show calling indicator
-      updateToolCallIndicator(tc.name, 'calling');
+      // Tool call status is handled by the ToolCallIndicator component
       
       try {
         // Automatically inject session_id for subsequent tool calls
@@ -828,8 +807,7 @@ export const MCPClient = () => {
         updateToolCallStatus(tc.id, 'success', processedResult);
         addLog('info', `Tool ${tc.name} executed`);
         
-        // Show success indicator
-        updateToolCallIndicator(tc.name, 'success', duration);
+        // Tool call success is shown by the ToolCallIndicator component
       } catch (e: any) {
         tc.error = e.message ?? String(e);
         tc.status = 'error';
@@ -837,8 +815,7 @@ export const MCPClient = () => {
         updateToolCallStatus(tc.id, 'error', undefined, tc.error);
         addLog('error', `Tool ${tc.name} failed: ${tc.error}`);
         
-        // Show error indicator
-        updateToolCallIndicator(tc.name, 'error');
+        // Tool call error is shown by the ToolCallIndicator component
       }
 
       // Immediately push tool result to provider history
