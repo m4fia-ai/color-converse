@@ -271,6 +271,9 @@ export const MCPClient = () => {
   };
 
   /* ────────────────────────── SEND MESSAGE ──────────────────────────── */
+  // Add a ref to track tool execution hops
+  const toolHopRef = useRef(0);
+
   const sendMessage = async () => {
     if ((!inputMessage.trim() && selectedImages.length === 0) || isLoading) return;
     const currentApiKey = getCurrentApiKey();
@@ -278,6 +281,9 @@ export const MCPClient = () => {
 
     // Reset pause state when starting new conversation
     setIsPaused(false);
+    
+    // Reset tool hop counter for new user message
+    toolHopRef.current = 0;
 
     // 1️⃣ Update UI & provider histories ---------------------------------
     const uiMsg: Message = {
@@ -296,7 +302,7 @@ export const MCPClient = () => {
     providerMessagesRef.current.push(providerUserMsg);
 
     // 2️⃣ Call the model --------------------------------------------------
-    await callLLM();
+    await callLLM({ allowTools: true });
   };
 
   // Call this to stop the current run
@@ -309,7 +315,7 @@ export const MCPClient = () => {
   };
 
   /* ──────────────────────── LLM CALL WRAPPER ─────────────────────────── */
-  const callLLM = async () => {
+  const callLLM = async ({ allowTools = true }: { allowTools?: boolean } = {}) => {
     setIsLoading(true);
     abortedRef.current = false;
     try {
@@ -320,7 +326,7 @@ export const MCPClient = () => {
 
       // Prepare tools payload if available
       let tools: any[] | undefined;
-      if (mcpTools.length && isConnected) {
+      if (allowTools && mcpTools.length && isConnected) {
         if (provider === 'Anthropic') {
           // Clear and rebuild the name mapping for Anthropic
           anthropicToolNameMapRef.current = new Map();
@@ -591,9 +597,12 @@ export const MCPClient = () => {
                       )
                     );
                   }
+                  
+                  // ✅ End the current stream BEFORE running tools to avoid overlap
+                  try { await reader.cancel(); } catch {}
+                  // Let executeToolCalls trigger the next LLM turn itself
                   await executeToolCalls(toolCalls);
-                  fullText = '';
-                  accumulatedToolCalls = {}; // Reset for next set of tool calls
+                  return; // ⬅️ EXIT handler; next turn starts fresh
                 }
               }
             }
@@ -658,9 +667,12 @@ export const MCPClient = () => {
                   }));
 
                   providerMessagesRef.current.push({ role: 'assistant', content: pendingAnthropicToolUses });
+                  
+                  // ✅ End the current stream BEFORE running tools to avoid overlap
+                  try { await reader.cancel(); } catch {}
+                  // Let executeToolCalls trigger the next LLM turn itself
                   await executeToolCalls(toolCalls);
-                  pendingAnthropicToolUses = [];
-                  fullText = '';
+                  return; // ⬅️ EXIT handler; next turn starts fresh
                 }
                 // mark end and break both loops
                 try { await reader.cancel(); } catch {}
@@ -1021,8 +1033,16 @@ export const MCPClient = () => {
       }
     }
 
+    // Check tool hop limit before making next LLM call
+    toolHopRef.current += 1;
+    if (toolHopRef.current >= 3) {
+      addLog('warning', 'Max tool hops reached; forcing summarization');
+      await callLLM({ allowTools: false });
+      return;
+    }
+
     // 🔁 Ask the LLM again so it can weave results into a final response
-    await callLLM();
+    await callLLM({ allowTools: false });
   };
 
   /* Helper to update ToolCall status inside UI messages */
@@ -1481,7 +1501,7 @@ export const MCPClient = () => {
                   if (isPaused) {
                     setIsPaused(false);
                     // optional: immediately let the model continue its reasoning now
-                    callLLM();
+                    callLLM({ allowTools: true });
                   } else {
                     setIsPaused(true); // just prevent new input
                   }
