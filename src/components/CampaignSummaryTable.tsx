@@ -23,17 +23,17 @@ export const CampaignSummaryTable = ({ items, title }: CampaignSummaryTableProps
 
   const getTypeColor = (type: string) => {
     switch (type) {
-      case 'campaign': return 'bg-blue-500/10 text-blue-700 dark:text-blue-300';
-      case 'adset': return 'bg-green-500/10 text-green-700 dark:text-green-300';
-      case 'ad': return 'bg-purple-500/10 text-purple-700 dark:text-purple-300';
-      default: return 'bg-gray-500/10 text-gray-700 dark:text-gray-300';
+      case 'campaign': return 'bg-primary/20 text-primary-foreground border-primary/30';
+      case 'adset': return 'bg-tertiary/20 text-tertiary-foreground border-tertiary/30';
+      case 'ad': return 'bg-secondary/20 text-secondary-foreground border-secondary/30';
+      default: return 'bg-muted text-muted-foreground border-border';
     }
   };
 
   return (
-    <Card className="mt-4 border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/30">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-green-700 dark:text-green-300">
+    <Card className="mt-4 border-primary/30 bg-primary/5 shadow-lg">
+      <CardHeader className="pb-3 bg-gradient-to-r from-primary/10 to-tertiary/10">
+        <CardTitle className="flex items-center gap-2 text-primary font-semibold">
           <CheckCircle className="h-5 w-5" />
           {title}
         </CardTitle>
@@ -53,16 +53,17 @@ export const CampaignSummaryTable = ({ items, title }: CampaignSummaryTableProps
             {items.map((item, index) => (
               <TableRow key={index}>
                 <TableCell>
-                  <Badge className={getTypeColor(item.type)}>
+                  <Badge className={getTypeColor(item.type)} variant="outline">
                     {item.type.toUpperCase()}
                   </Badge>
                 </TableCell>
-                <TableCell className="font-medium">{item.name}</TableCell>
+                <TableCell className="font-medium text-foreground">{item.name}</TableCell>
                 <TableCell className="font-mono text-sm text-muted-foreground">
                   {item.id || 'N/A'}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={item.status === 'ACTIVE' ? 'default' : 'secondary'}>
+                  <Badge variant={item.status === 'ACTIVE' ? 'default' : 'secondary'} 
+                         className={item.status === 'ACTIVE' ? 'bg-primary/20 text-primary border-primary/30' : ''}>
                     {item.status || 'N/A'}
                   </Badge>
                 </TableCell>

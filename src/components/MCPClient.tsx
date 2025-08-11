@@ -5,7 +5,7 @@ import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { Textarea } from './ui/textarea';
-import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw, Play, FileText, ChevronDown, ChevronRight, Circle, Copy, Check, Activity, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw, Play, Pause, FileText, ChevronDown, ChevronRight, Circle, Copy, Check, Activity, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -97,6 +97,7 @@ export const MCPClient = () => {
   const [activeToolCall, setActiveToolCall] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
+  const [isPaused, setIsPaused] = useState<boolean>(false);
 
   // Provider settings
   const [openaiApiKey, setOpenaiApiKey] = useState('');
@@ -269,7 +270,7 @@ export const MCPClient = () => {
 
   /* ────────────────────────── SEND MESSAGE ──────────────────────────── */
   const sendMessage = async () => {
-    if ((!inputMessage.trim() && selectedImages.length === 0) || isLoading) return;
+    if ((!inputMessage.trim() && selectedImages.length === 0) || isLoading || isPaused) return;
     const currentApiKey = getCurrentApiKey();
     if (!currentApiKey) return toast({ title: `Missing ${selectedProvider.name} API key`, variant: 'destructive' });
 
@@ -716,6 +717,7 @@ export const MCPClient = () => {
 
   /* ────────────────────────── TOOL EXECUTION ─────────────────────────── */
   const executeToolCalls = async (toolCalls: ToolCall[]) => {
+    if (isPaused) return;
     const provider = selectedProvider.name;
 
     // Tool call indicators are handled by the ToolCallIndicator component
@@ -1264,6 +1266,15 @@ export const MCPClient = () => {
               </div>
             )}
             
+            {isPaused && (
+              <div className="mb-3 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 text-sm">
+                  <Pause className="h-4 w-4" />
+                  Chat is paused. Click resume to continue.
+                </div>
+              </div>
+            )}
+            
             <div className="flex gap-2">
               <input
                 ref={fileInputRef}
@@ -1279,8 +1290,19 @@ export const MCPClient = () => {
                 size="sm"
                 onClick={() => fileInputRef.current?.click()}
                 className="flex-shrink-0 border-primary text-primary"
+                disabled={isPaused}
               >
                 <Paperclip className="w-4 h-4" />
+              </Button>
+              
+              <Button 
+                onClick={() => setIsPaused(!isPaused)}
+                variant="outline"
+                size="sm"
+                className="flex-shrink-0 border-primary text-primary"
+                title={isPaused ? "Resume chat" : "Pause chat"}
+              >
+                {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
               </Button>
               
                <Textarea
@@ -1298,17 +1320,18 @@ export const MCPClient = () => {
                      sendMessage();
                    }
                  }}
-                 placeholder="Type your message..."
+                 placeholder={isPaused ? "Chat is paused..." : "Type your message..."}
                  className="flex-1 resize-none border-primary focus:border-primary text-foreground min-h-[40px] max-h-[200px]"
                  style={{
                    height: 'auto',
                    overflowY: inputMessage.split('\n').length > 4 ? 'auto' : 'hidden'
                  }}
+                 disabled={isPaused}
                />
               
               <Button
                 onClick={sendMessage}
-                disabled={isLoading || (!inputMessage.trim() && selectedImages.length === 0)}
+                disabled={isLoading || (!inputMessage.trim() && selectedImages.length === 0) || isPaused}
                 className="flex-shrink-0 bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
