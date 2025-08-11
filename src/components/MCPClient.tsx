@@ -271,7 +271,9 @@ export const MCPClient = () => {
   };
 
   /* ────────────────────────── SEND MESSAGE ──────────────────────────── */
-  // Add a ref to track tool execution hops
+  // Add autonomy state and tool hop tracking
+  const [autonomyOn, setAutonomyOn] = useState(true);
+  const [maxToolHops, setMaxToolHops] = useState(4);
   const toolHopRef = useRef(0);
 
   const sendMessage = async () => {
@@ -302,7 +304,7 @@ export const MCPClient = () => {
     providerMessagesRef.current.push(providerUserMsg);
 
     // 2️⃣ Call the model --------------------------------------------------
-    await callLLM({ allowTools: true });
+    await callLLM({ allowTools: autonomyOn });
   };
 
   // Call this to stop the current run
@@ -1033,16 +1035,27 @@ export const MCPClient = () => {
       }
     }
 
-    // Check tool hop limit before making next LLM call
+    // Check tool hop limit and autonomy mode
     toolHopRef.current += 1;
-    if (toolHopRef.current >= 3) {
-      addLog('warning', 'Max tool hops reached; forcing summarization');
-      await callLLM({ allowTools: false });
-      return;
+    
+    // Optional: detect actionable errors that suggest another tool call
+    const hadActionableError = toolCalls.some(tc => {
+      try {
+        const o = typeof tc.result === 'string' ? JSON.parse(tc.result) : tc.result;
+        const d = o?.details || o?.error || '';
+        return /missing|required|not found|hit the|call|try/i.test(String(d));
+      } catch { return false; }
+    });
+    
+    const moreStepsAllowed = (autonomyOn || hadActionableError) && toolHopRef.current < maxToolHops;
+    
+    if (moreStepsAllowed) {
+      // Let the model read tool output and pick the next tool autonomously
+      await callLLM({ allowTools: true });
+    } else {
+      addLog('info', 'Autonomy cap reached or off; summarizing.');
+      await callLLM({ allowTools: false }); // final narrative response
     }
-
-    // 🔁 Ask the LLM again so it can weave results into a final response
-    await callLLM({ allowTools: false });
   };
 
   /* Helper to update ToolCall status inside UI messages */

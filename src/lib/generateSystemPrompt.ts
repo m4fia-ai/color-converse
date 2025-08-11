@@ -46,6 +46,12 @@ IMPORTANT SESSION HANDLING:
 - Once you receive a response from the first tool call that contains a session_id, use that SAME session_id in ALL subsequent tool calls within the conversation
 - Always maintain session continuity by reusing the session_id from the first tool response
 
+AUTONOMOUS TOOL EXECUTION:
+- You may autonomously call tools to complete the user's goal without waiting for confirmation
+- If a tool response indicates a missing prerequisite (e.g., "No lead form id... hit get_all_lead_form"), call the appropriate tool next automatically
+- Chain tool calls logically to fulfill the user's request efficiently
+- When finished or after reaching the tool limit, provide a concise summary and ask if the user wants to continue
+
 When a tool is relevant, call it. Otherwise, guide the user in plain English with beautifully formatted markdown.
 Also tell the user before hitting a tool and after each tool call about the result and the next steps
 `;
