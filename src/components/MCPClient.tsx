@@ -506,7 +506,7 @@ export const MCPClient = () => {
             try {
               parsed = JSON.parse(dataPayload);
             
-            /* ------------- OPENAI ------------- */
+              /* ------------- OPENAI ------------- */
             if (provider === 'OpenAI') {
               /* text tokens */
               const deltaTxt = parsed.choices?.[0]?.delta?.content;
@@ -667,8 +667,10 @@ export const MCPClient = () => {
                 throw new Error('__STREAM_END__');
               }
             }
-          } catch (err) {
-            console.warn('Bad SSE chunk', err, dataPayload);
+            } catch (err) {
+              console.warn('Bad SSE chunk', err, dataPayload);
+              continue;
+            }
           }
         } catch (e) {
           if (String(e) === '__STREAM_END__') break; // exits outer while
