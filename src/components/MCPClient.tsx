@@ -173,15 +173,16 @@ export const MCPClient = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Keep system prompt up-to-date when tools change
+  // Keep system prompt up-to-date when tools change (OpenAI only)
   useEffect(() => {
     if (
+      selectedProvider.name === 'OpenAI' &&
       providerMessagesRef.current.length &&
       providerMessagesRef.current[0].role === 'system'
     ) {
       providerMessagesRef.current[0].content = generateSystemPrompt(mcpTools);
     }
-  }, [mcpTools]);
+  }, [mcpTools, selectedProvider.name]);
 
   /* ─────────────────────────── LOGGING HELPERS ───────────────────────── */
   const addLog = (level: 'info' | 'error' | 'warning', message: string) => {
@@ -204,8 +205,9 @@ export const MCPClient = () => {
         setIsConnected(true);
         setIsConnecting(false);
 
-        // 🔑 Overwrite the original system message so the LLM sees the tools
+        // 🔑 Update system message for OpenAI only
         if (
+          selectedProvider.name === 'OpenAI' &&
           providerMessagesRef.current.length &&
           providerMessagesRef.current[0].role === 'system'
         ) {
@@ -316,12 +318,17 @@ export const MCPClient = () => {
       }
 
       // Use proxy endpoints with streaming
+      let messagesForRequest = providerMessagesRef.current;
+
+      // Anthropic: remove any stray system msgs and set top-level system field
+      if (provider === 'Anthropic') {
+        messagesForRequest = messagesForRequest.filter(m => m.role !== 'system');
+      }
+
       const body: any = {
         apiKey: getCurrentApiKey(),
         model: selectedModel,
-        messages: providerMessagesRef.current.filter(msg => 
-          provider === 'Anthropic' ? msg.role !== 'system' : true
-        ),
+        messages: messagesForRequest,
         maxTokens: 1000,
         tools,
         stream: true
@@ -406,6 +413,7 @@ export const MCPClient = () => {
     let buffer = '';
     let fullText = '';
     let accumulatedToolCalls: any = {}; // Accumulate tool call data for OpenAI
+    let pendingAnthropicToolUses: any[] = [];  // NEW: collect Anthropic tool_use events
 
     try {
       while (true) {
@@ -553,16 +561,15 @@ export const MCPClient = () => {
               }
 
               if (parsed.type === 'tool_use') {
+                pendingAnthropicToolUses.push(parsed); // collect, don't execute yet
+                // Show UI tool indicator but don't push to provider messages yet
                 const toolCalls: ToolCall[] = [{
                   id: parsed.id,
                   name: parsed.name,
                   args: parsed.input,
                   status: 'pending',
                 }];
-                providerMessagesRef.current.push({
-                  role: 'assistant',
-                  content: [parsed],            // Claude's own shape
-                });
+                
                 // Create or update message with tool calls
                 if (!messageCreated) {
                   appendAssistantMessage(fullText, toolCalls);
@@ -571,15 +578,34 @@ export const MCPClient = () => {
                   // Update existing streaming message with tool calls
                   setMessages(prev =>
                     prev.map(m =>
-                      m.id === streamingId ? { ...m, toolCalls, isStreaming: false } : m
+                      m.id === streamingId ? { 
+                        ...m, 
+                        toolCalls: [...(m.toolCalls || []), ...toolCalls],
+                        isStreaming: false 
+                      } : m
                     )
                   );
                 }
-                await executeToolCalls(toolCalls);
-                fullText = '';
               }
 
               if (parsed.type === 'message_stop') {
+                // Push the assistant message (you already do this) then execute ALL tools:
+                if (pendingAnthropicToolUses.length) {
+                  const toolCalls: ToolCall[] = pendingAnthropicToolUses.map(p => ({
+                    id: p.id, name: p.name, args: p.input, status: 'pending'
+                  }));
+
+                  // record assistant message with all tool_use blocks
+                  providerMessagesRef.current.push({ 
+                    role: 'assistant', 
+                    content: pendingAnthropicToolUses 
+                  });
+
+                  await executeToolCalls(toolCalls);
+                  pendingAnthropicToolUses = []; // reset
+                  fullText = '';
+                }
+
                 reader.cancel();
                 break;
               }
