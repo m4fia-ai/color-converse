@@ -5,15 +5,18 @@ import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { Textarea } from './ui/textarea';
-import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw, Play, FileText, ChevronDown, ChevronRight, Circle, Copy, Check } from 'lucide-react';
+import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw, Play, FileText, ChevronDown, ChevronRight, Circle, Copy, Check, Activity, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { useToast } from '@/hooks/use-toast';
 import { MCPClientManager } from '@/lib/mcpClient';
 import { generateSystemPrompt } from '@/lib/generateSystemPrompt';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { ToolCallIndicator } from './ToolCallIndicator';
+import { CampaignSummaryTable } from './CampaignSummaryTable';
 
 interface MCPTool {
   name: string;
@@ -28,6 +31,8 @@ interface ToolCall {
   result?: any;
   error?: string;
   status: 'pending' | 'success' | 'error';
+  startTime?: Date;
+  endTime?: Date;
 }
 
 interface Message {
@@ -642,13 +647,98 @@ export const MCPClient = () => {
     ]);
   };
 
+  const appendToolIndicator = (status: 'pre-call' | 'calling' | 'success' | 'error', toolName: string, duration?: number) => {
+    setMessages(prev => [
+      ...prev,
+      { 
+        id: `indicator-${Date.now()}-${Math.random()}`, 
+        role: 'assistant', 
+        content: `<ToolCallIndicator status="${status}" toolName="${toolName}" ${duration ? `duration="${duration}"` : ''} />`, 
+        timestamp: new Date() 
+      }
+    ]);
+  };
+
+  const appendCampaignSummary = (items: any[]) => {
+    setMessages(prev => [
+      ...prev,
+      { 
+        id: `summary-${Date.now()}`, 
+        role: 'assistant', 
+        content: `<CampaignSummaryTable items='${JSON.stringify(items)}' title="Campaign Creation Summary" />`, 
+        timestamp: new Date() 
+      }
+    ]);
+  };
+
+  /* ───────────────────── CAMPAIGN SUMMARY PARSER ─────────────────────── */
+  const parseCampaignResults = (toolCalls: ToolCall[]) => {
+    const campaignItems: any[] = [];
+    
+    toolCalls.forEach(tc => {
+      if (tc.result && tc.status === 'success') {
+        try {
+          const result = typeof tc.result === 'string' ? JSON.parse(tc.result) : tc.result;
+          
+          // Check for campaign creation
+          if (tc.name.includes('campaign') && result.campaign_id) {
+            campaignItems.push({
+              type: 'campaign',
+              name: tc.args.campaign_name || 'New Campaign',
+              id: result.campaign_id,
+              status: result.status || 'ACTIVE',
+              budget: tc.args.daily_budget ? `$${tc.args.daily_budget}/day` : undefined
+            });
+          }
+          
+          // Check for adset creation
+          if (tc.name.includes('adset') && result.adset_id) {
+            campaignItems.push({
+              type: 'adset',
+              name: tc.args.adset_name || 'New Ad Set',
+              id: result.adset_id,
+              status: result.status || 'ACTIVE',
+              budget: tc.args.budget ? `$${tc.args.budget}` : undefined,
+              targeting: tc.args.targeting ? JSON.stringify(tc.args.targeting).slice(0, 50) + '...' : undefined
+            });
+          }
+          
+          // Check for ad creation
+          if (tc.name.includes('ad') && result.ad_id) {
+            campaignItems.push({
+              type: 'ad',
+              name: tc.args.ad_name || 'New Ad',
+              id: result.ad_id,
+              status: result.status || 'ACTIVE',
+              creative: tc.args.creative_type || undefined
+            });
+          }
+        } catch (e) {
+          console.warn('Failed to parse tool result for campaign summary:', e);
+        }
+      }
+    });
+    
+    return campaignItems;
+  };
+
   /* ────────────────────────── TOOL EXECUTION ─────────────────────────── */
   const executeToolCalls = async (toolCalls: ToolCall[]) => {
     const provider = selectedProvider.name;
 
+    // Show pre-call indicators
+    toolCalls.forEach(tc => {
+      appendToolIndicator('pre-call', tc.name);
+    });
+
     for (const tc of toolCalls) {
       setActiveToolCall(tc.id);
       updateToolCallStatus(tc.id, 'pending');
+      tc.startTime = new Date();
+      
+      // Show calling indicator
+      appendToolIndicator('calling', tc.name);
+      
       try {
         // Automatically inject session_id for subsequent tool calls
         const toolArgs = { ...tc.args };
@@ -726,13 +816,22 @@ export const MCPClient = () => {
         
         tc.result = processedResult;
         tc.status = 'success';
+        tc.endTime = new Date();
+        const duration = tc.startTime ? tc.endTime.getTime() - tc.startTime.getTime() : 0;
         updateToolCallStatus(tc.id, 'success', processedResult);
         addLog('info', `Tool ${tc.name} executed`);
+        
+        // Show success indicator
+        appendToolIndicator('success', tc.name, duration);
       } catch (e: any) {
         tc.error = e.message ?? String(e);
         tc.status = 'error';
+        tc.endTime = new Date();
         updateToolCallStatus(tc.id, 'error', undefined, tc.error);
         addLog('error', `Tool ${tc.name} failed: ${tc.error}`);
+        
+        // Show error indicator
+        appendToolIndicator('error', tc.name);
       }
 
       // Immediately push tool result to provider history
@@ -747,6 +846,12 @@ export const MCPClient = () => {
     }
 
     setActiveToolCall(null);
+
+    // Check for campaign/adset/ad creations and show summary
+    const campaignItems = parseCampaignResults(toolCalls);
+    if (campaignItems.length > 0) {
+      appendCampaignSummary(campaignItems);
+    }
 
     // 🔁 Ask the LLM again so it can weave results into a final response
     await callLLM();
