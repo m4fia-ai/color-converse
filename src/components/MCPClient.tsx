@@ -458,46 +458,53 @@ export const MCPClient = () => {
         buffer += value;
 
         // Process every complete SSE event (blank line = event boundary)
-        while (true) {
-          // Prefer CRLFCRLF first (Windows/HTTP default), else LFLF
-          const crlf = buffer.indexOf('\r\n\r\n');
-          const lflf = buffer.indexOf('\n\n');
+        try {
+          while (true) {
+            // Prefer CRLFCRLF first (Windows/HTTP default), else LFLF
+            const crlf = buffer.indexOf('\r\n\r\n');
+            const lflf = buffer.indexOf('\n\n');
 
-          if (crlf === -1 && lflf === -1) break;
+            if (crlf === -1 && lflf === -1) break;
 
-          // Pick earliest boundary and its length
-          let boundaryIndex: number;
-          let boundaryLen: number;
-          if (crlf !== -1 && (lflf === -1 || crlf < lflf)) {
-            boundaryIndex = crlf;
-            boundaryLen = 4;       // \r\n\r\n
-          } else {
-            boundaryIndex = lflf;
-            boundaryLen = 2;       // \n\n
-          }
+            // Pick earliest boundary and its length
+            let boundaryIndex: number;
+            let boundaryLen: number;
+            if (crlf !== -1 && (lflf === -1 || crlf < lflf)) {
+              boundaryIndex = crlf;
+              boundaryLen = 4;       // \r\n\r\n
+            } else {
+              boundaryIndex = lflf;
+              boundaryLen = 2;       // \n\n
+            }
 
-          const raw = buffer.slice(0, boundaryIndex);
-          buffer = buffer.slice(boundaryIndex + boundaryLen);
+            const raw = buffer.slice(0, boundaryIndex);
+            buffer = buffer.slice(boundaryIndex + boundaryLen);
 
-          // Don't trim the whole block (can remove meaningful spaces in data),
-          // just normalize CRLF to LF for line parsing.
-          const normalized = raw.replace(/\r/g, '');
-          const lines = normalized.split('\n');
+            // Normalize and split lines
+            const normalized = raw.replace(/\r/g, '');
+            const lines = normalized.split('\n');
 
-          // Find the data line (Anthropic sends `event:` + `data:`; OpenAI sends only `data:`)
-          const dataLine = lines.find(l => l.startsWith('data:'));
-          if (!dataLine) continue;
+            // Capture event name (may be undefined for OpenAI)
+            const eventLine = lines.find(l => l.startsWith('event:'));
+            const eventName = eventLine ? eventLine.slice('event:'.length).trim() : undefined;
 
-          const payload = dataLine.slice('data:'.length).trim();
+            // Join ALL data lines per SSE spec
+            const dataPayload = lines
+              .filter(l => l.startsWith('data:'))
+              .map(l => l.slice('data:'.length).trimStart())
+              .join('\n');
 
-          // OpenAI terminator
-          if (payload === '[DONE]') {
-            try { await reader.cancel(); } catch {}
-            break;
-          }
+            if (!dataPayload) continue;
 
-          try {
-            const parsed = JSON.parse(payload);
+            // OpenAI terminator
+            if (dataPayload === '[DONE]') {
+              try { await reader.cancel(); } catch {}
+              throw new Error('__STREAM_END__');
+            }
+
+            let parsed: any;
+            try {
+              parsed = JSON.parse(dataPayload);
             
             /* ------------- OPENAI ------------- */
             if (provider === 'OpenAI') {
@@ -593,7 +600,8 @@ export const MCPClient = () => {
 
             /* ------------- ANTHROPIC ------------- */
             if (provider === 'Anthropic') {
-              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+              // Text deltas
+              if (eventName === 'content_block_delta' && parsed.delta?.text) {
                 fullText += parsed.delta.text;
                 
                 // Create message only when we have content
@@ -613,9 +621,10 @@ export const MCPClient = () => {
                 }
               }
 
-              if (parsed.type === 'tool_use') {
-                pendingAnthropicToolUses.push(parsed); // collect, don't execute yet
-                // Show UI tool indicator but don't push to provider messages yet
+              // Tool call begins here (data.type === 'tool_use' on content_block_start)
+              if (eventName === 'content_block_start' && parsed.type === 'tool_use') {
+                pendingAnthropicToolUses.push(parsed);
+
                 const toolCalls: ToolCall[] = [{
                   id: parsed.id,
                   name: parsed.name,
@@ -641,53 +650,53 @@ export const MCPClient = () => {
                 }
               }
 
-              if (parsed.type === 'message_stop') {
-                // Push the assistant message (you already do this) then execute ALL tools:
+              // End of message: now execute all tool uses
+              if (eventName === 'message_stop') {
                 if (pendingAnthropicToolUses.length) {
                   const toolCalls: ToolCall[] = pendingAnthropicToolUses.map(p => ({
                     id: p.id, name: p.name, args: p.input, status: 'pending'
                   }));
 
-                  // record assistant message with all tool_use blocks
-                  providerMessagesRef.current.push({ 
-                    role: 'assistant', 
-                    content: pendingAnthropicToolUses 
-                  });
-
+                  providerMessagesRef.current.push({ role: 'assistant', content: pendingAnthropicToolUses });
                   await executeToolCalls(toolCalls);
-                  pendingAnthropicToolUses = []; // reset
+                  pendingAnthropicToolUses = [];
                   fullText = '';
                 }
-
-                reader.cancel();
-                break;
+                // mark end and break both loops
+                try { await reader.cancel(); } catch {}
+                throw new Error('__STREAM_END__');
               }
             }
           } catch (err) {
-            console.warn('Bad SSE chunk', err, payload);
+            console.warn('Bad SSE chunk', err, dataPayload);
           }
+        } catch (e) {
+          if (String(e) === '__STREAM_END__') break; // exits outer while
+          throw e;
         }
       }
-
-      // finalise message
-      setMessages(prev =>
-        prev.map(m =>
-          m.id === streamingId ? { ...m, isStreaming: false } : m
-        )
-      );
-      
-      // Only push assistant message if there's actual content
-      if (fullText.trim()) {
-        providerMessagesRef.current.push(
-          provider === 'Anthropic'
-            ? { role: 'assistant', content: [{ type: 'text', text: fullText }] }
-            : { role: 'assistant', content: fullText }
-        );
-      }
     } catch (error) {
-      console.error('Streaming error:', error);
-      setMessages(prev => prev.filter(m => m.id !== streamingId));
-      toast({ title: 'Streaming error', description: 'Connection interrupted', variant: 'destructive' });
+      if (String(error) !== '__STREAM_END__') {
+        console.error('Streaming error:', error);
+        setMessages(prev => prev.filter(m => m.id !== streamingId));
+        toast({ title: 'Streaming error', description: 'Connection interrupted', variant: 'destructive' });
+      }
+    }
+
+    // finalise message
+    setMessages(prev =>
+      prev.map(m =>
+        m.id === streamingId ? { ...m, isStreaming: false } : m
+      )
+    );
+    
+    // Only push assistant message if there's actual content
+    if (fullText.trim()) {
+      providerMessagesRef.current.push(
+        provider === 'Anthropic'
+          ? { role: 'assistant', content: [{ type: 'text', text: fullText }] }
+          : { role: 'assistant', content: fullText }
+      );
     }
   };
 
