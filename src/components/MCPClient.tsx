@@ -647,16 +647,23 @@ export const MCPClient = () => {
     ]);
   };
 
-  const appendToolIndicator = (status: 'pre-call' | 'calling' | 'success' | 'error', toolName: string, duration?: number) => {
-    setMessages(prev => [
-      ...prev,
-      { 
-        id: `indicator-${Date.now()}-${Math.random()}`, 
-        role: 'assistant', 
-        content: `<ToolCallIndicator status="${status}" toolName="${toolName}" ${duration ? `duration="${duration}"` : ''} />`, 
-        timestamp: new Date() 
-      }
-    ]);
+  const updateToolCallIndicator = (toolName: string, status: 'pre-call' | 'calling' | 'success' | 'error', duration?: number) => {
+    setMessages(prev => 
+      prev.map(msg => {
+        if (msg.toolCalls?.some(tc => tc.name === toolName)) {
+          // Update the tool call status in the existing message
+          const updatedToolCalls = msg.toolCalls?.map(tc => 
+            tc.name === toolName ? { 
+              ...tc, 
+              status: status === 'pre-call' || status === 'calling' ? 'pending' as const : status as 'success' | 'error', 
+              endTime: status === 'success' || status === 'error' ? new Date() : tc.endTime 
+            } : tc
+          );
+          return { ...msg, toolCalls: updatedToolCalls };
+        }
+        return msg;
+      })
+    );
   };
 
   const appendCampaignSummary = (items: any[]) => {
@@ -728,7 +735,7 @@ export const MCPClient = () => {
 
     // Show pre-call indicators
     toolCalls.forEach(tc => {
-      appendToolIndicator('pre-call', tc.name);
+      updateToolCallIndicator(tc.name, 'pre-call');
     });
 
     for (const tc of toolCalls) {
@@ -737,7 +744,7 @@ export const MCPClient = () => {
       tc.startTime = new Date();
       
       // Show calling indicator
-      appendToolIndicator('calling', tc.name);
+      updateToolCallIndicator(tc.name, 'calling');
       
       try {
         // Automatically inject session_id for subsequent tool calls
@@ -822,7 +829,7 @@ export const MCPClient = () => {
         addLog('info', `Tool ${tc.name} executed`);
         
         // Show success indicator
-        appendToolIndicator('success', tc.name, duration);
+        updateToolCallIndicator(tc.name, 'success', duration);
       } catch (e: any) {
         tc.error = e.message ?? String(e);
         tc.status = 'error';
@@ -831,7 +838,7 @@ export const MCPClient = () => {
         addLog('error', `Tool ${tc.name} failed: ${tc.error}`);
         
         // Show error indicator
-        appendToolIndicator('error', tc.name);
+        updateToolCallIndicator(tc.name, 'error');
       }
 
       // Immediately push tool result to provider history
