@@ -457,25 +457,47 @@ export const MCPClient = () => {
         if (done) break;
         buffer += value;
 
-    // Process every complete SSE event (ends with blank line)
-    let boundary;
-    while ((boundary = buffer.search(/\r?\n\r?\n/)) !== -1) {
-      const raw = buffer.slice(0, boundary).replace(/\r/g, '').trim();   // one event
-      buffer = buffer.slice(boundary + 2);            // rest of the stream
+        // Process every complete SSE event (blank line = event boundary)
+        while (true) {
+          // Prefer CRLFCRLF first (Windows/HTTP default), else LFLF
+          const crlf = buffer.indexOf('\r\n\r\n');
+          const lflf = buffer.indexOf('\n\n');
 
-          // Anthropic puts "event:" before "data:", OpenAI doesn't.
-          const dataLine = raw.split('\n').find(l => l.startsWith('data:'));
+          if (crlf === -1 && lflf === -1) break;
+
+          // Pick earliest boundary and its length
+          let boundaryIndex: number;
+          let boundaryLen: number;
+          if (crlf !== -1 && (lflf === -1 || crlf < lflf)) {
+            boundaryIndex = crlf;
+            boundaryLen = 4;       // \r\n\r\n
+          } else {
+            boundaryIndex = lflf;
+            boundaryLen = 2;       // \n\n
+          }
+
+          const raw = buffer.slice(0, boundaryIndex);
+          buffer = buffer.slice(boundaryIndex + boundaryLen);
+
+          // Don't trim the whole block (can remove meaningful spaces in data),
+          // just normalize CRLF to LF for line parsing.
+          const normalized = raw.replace(/\r/g, '');
+          const lines = normalized.split('\n');
+
+          // Find the data line (Anthropic sends `event:` + `data:`; OpenAI sends only `data:`)
+          const dataLine = lines.find(l => l.startsWith('data:'));
           if (!dataLine) continue;
-          const data = dataLine.replace(/^data:\s*/, '');
 
-          // OpenAI terminator; Anthropic ends with event: message_stop
-          if (data === '[DONE]') {
-            reader.cancel();
+          const payload = dataLine.slice('data:'.length).trim();
+
+          // OpenAI terminator
+          if (payload === '[DONE]') {
+            try { await reader.cancel(); } catch {}
             break;
           }
 
           try {
-            const parsed = JSON.parse(data);
+            const parsed = JSON.parse(payload);
             
             /* ------------- OPENAI ------------- */
             if (provider === 'OpenAI') {
@@ -642,7 +664,7 @@ export const MCPClient = () => {
               }
             }
           } catch (err) {
-            console.warn('Bad SSE chunk', err, raw);
+            console.warn('Bad SSE chunk', err, payload);
           }
         }
       }
@@ -653,11 +675,15 @@ export const MCPClient = () => {
           m.id === streamingId ? { ...m, isStreaming: false } : m
         )
       );
-      providerMessagesRef.current.push(
-        provider === 'Anthropic'
-          ? { role: 'assistant', content: [{ type: 'text', text: fullText }] }
-          : { role: 'assistant', content: fullText }
-      );
+      
+      // Only push assistant message if there's actual content
+      if (fullText.trim()) {
+        providerMessagesRef.current.push(
+          provider === 'Anthropic'
+            ? { role: 'assistant', content: [{ type: 'text', text: fullText }] }
+            : { role: 'assistant', content: fullText }
+        );
+      }
     } catch (error) {
       console.error('Streaming error:', error);
       setMessages(prev => prev.filter(m => m.id !== streamingId));
