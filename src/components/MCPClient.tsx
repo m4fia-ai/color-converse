@@ -6,6 +6,8 @@ import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { Textarea } from './ui/textarea';
 import { Settings, Send, Paperclip, Loader2, Bot, User, Wrench, Terminal, RefreshCw, Play, Pause, FileText, ChevronDown, ChevronRight, Circle, Copy, Check, Activity, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { Switch } from './ui/switch';
+import { Slider } from './ui/slider';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -166,6 +168,10 @@ export const MCPClient = () => {
       const p = API_PROVIDERS.find(p => p.name === s.provider) ?? API_PROVIDERS[0];
       setSelectedProvider(p);
       setSelectedModel(s.model ?? p.models[0]);
+      
+      // Restore autonomy settings
+      if (s.autonomyOn !== undefined) setAutonomyOn(s.autonomyOn);
+      if (s.maxToolHops !== undefined) setMaxToolHops(s.maxToolHops);
     } else {
       setSelectedModel(API_PROVIDERS[0].models[0]);
     }
@@ -1262,12 +1268,55 @@ export const MCPClient = () => {
                     placeholder="Enter Google API key"
                   />
                 </div>
+                
+                {/* Autonomy Settings */}
+                <div className="border-t pt-4">
+                  <h3 className="text-sm font-semibold mb-3">Autonomy Settings</h3>
+                  
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="autonomy-toggle">Autonomous Tool Execution</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Allow the AI to chain tools automatically without confirmation
+                        </p>
+                      </div>
+                      <Switch
+                        id="autonomy-toggle"
+                        checked={autonomyOn}
+                        onCheckedChange={setAutonomyOn}
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="max-hops">Max Tool Steps</Label>
+                        <span className="text-sm text-muted-foreground">{maxToolHops}</span>
+                      </div>
+                      <Slider
+                        id="max-hops"
+                        min={1}
+                        max={8}
+                        step={1}
+                        value={[maxToolHops]}
+                        onValueChange={(value) => setMaxToolHops(value[0])}
+                        className="w-full"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Maximum number of sequential tool calls per user message
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
                 <Button 
                   onClick={() => {
                     localStorage.setItem('climaty-settings', JSON.stringify({
                       openaiApiKey, anthropicApiKey, googleApiKey, 
                       provider: selectedProvider.name, 
-                      model: selectedModel
+                      model: selectedModel,
+                      autonomyOn,
+                      maxToolHops
                     }));
                     toast({ title: 'Settings saved' });
                   }}
