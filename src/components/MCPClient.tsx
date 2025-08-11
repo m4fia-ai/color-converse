@@ -116,6 +116,9 @@ export const MCPClient = () => {
   const { toast } = useToast();
   const [serverUrl] = useState('https://redis-hosted-mcp-server-production.up.railway.app/mcp');
 
+  // Anthropic tool name mapping (safe name -> original MCP name)
+  const anthropicToolNameMapRef = useRef<Map<string, string>>(new Map());
+
   /** Provider‑formatted conversation history (kept outside React state so we
    *   can mutate synchronously without rerenders). Each element is already in
    *   the shape expected by the specific provider. */
@@ -260,6 +263,13 @@ export const MCPClient = () => {
     }
   };
 
+  // Helper: guarantee a valid JSON Schema object for Anthropic
+  const ensureValidJsonSchema = (schema?: any) => {
+    if (schema && typeof schema === 'object' && schema.type) return schema;
+    // Fallback to permissive object schema if MCP tool has no schema
+    return { type: 'object', additionalProperties: true };
+  };
+
   /* ────────────────────────── SEND MESSAGE ──────────────────────────── */
   const sendMessage = async () => {
     if ((!inputMessage.trim() && selectedImages.length === 0) || isLoading) return;
@@ -311,10 +321,31 @@ export const MCPClient = () => {
       // Prepare tools payload if available
       let tools: any[] | undefined;
       if (mcpTools.length && isConnected) {
-        tools = mcpTools.map(t => provider === 'OpenAI'
-          ? { type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema ?? {} } }
-          : { name: t.name, description: t.description, input_schema: t.inputSchema ?? {} }
-        );
+        if (provider === 'Anthropic') {
+          // Clear and rebuild the name mapping for Anthropic
+          anthropicToolNameMapRef.current = new Map();
+          tools = mcpTools.map(t => {
+            const safe = (t.name || 'tool')
+              .replace(/[^a-zA-Z0-9_-]/g, '_')  // Anthropic's allowed chars
+              .slice(0, 64) || 'tool';
+            anthropicToolNameMapRef.current.set(safe, t.name);
+            return {
+              name: safe,
+              description: t.description || 'No description provided',
+              input_schema: ensureValidJsonSchema(t.inputSchema),
+            };
+          });
+        } else {
+          // OpenAI format
+          tools = mcpTools.map(t => ({ 
+            type: 'function', 
+            function: { 
+              name: t.name, 
+              description: t.description, 
+              parameters: t.inputSchema ?? {} 
+            } 
+          }));
+        }
       }
 
       // Use proxy endpoints with streaming
@@ -796,6 +827,13 @@ export const MCPClient = () => {
       updateToolCallStatus(tc.id, 'pending');
       tc.startTime = new Date();
       
+      // Map Anthropic safe tool name back to original MCP tool name
+      let execName = tc.name;
+      if (selectedProvider.name === 'Anthropic') {
+        const mapped = anthropicToolNameMapRef.current.get(tc.name);
+        if (mapped) execName = mapped;  // map safe name -> real MCP tool name
+      }
+      
       // Tool call status is handled by the ToolCallIndicator component
       
       try {
@@ -803,10 +841,10 @@ export const MCPClient = () => {
         const toolArgs = { ...tc.args };
         if (sessionId && !toolArgs.session_id) {
           toolArgs.session_id = sessionId;
-          addLog('info', `Auto-injecting session_id: ${sessionId} for tool ${tc.name}`);
+          addLog('info', `Auto-injecting session_id: ${sessionId} for tool ${execName}`);
         }
 
-        const result = await mcpClientRef.current.callTool(tc.name, toolArgs);
+        const result = await mcpClientRef.current.callTool(execName, toolArgs);
         
         // Check if aborted after tool execution
         if (abortedRef.current) {
@@ -892,7 +930,7 @@ export const MCPClient = () => {
         tc.endTime = new Date();
         const duration = tc.startTime ? tc.endTime.getTime() - tc.startTime.getTime() : 0;
         updateToolCallStatus(tc.id, 'success', processedResult);
-        addLog('info', `Tool ${tc.name} executed`);
+        addLog('info', `Tool ${execName} executed`);
         
         // Tool call success is shown by the ToolCallIndicator component
       } catch (e: any) {
@@ -900,7 +938,7 @@ export const MCPClient = () => {
         tc.status = 'error';
         tc.endTime = new Date();
         updateToolCallStatus(tc.id, 'error', undefined, tc.error);
-        addLog('error', `Tool ${tc.name} failed: ${tc.error}`);
+        addLog('error', `Tool ${execName} failed: ${tc.error}`);
         
         // Tool call error is shown by the ToolCallIndicator component
       }
