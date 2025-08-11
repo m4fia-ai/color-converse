@@ -136,21 +136,9 @@ export const MCPClient = () => {
         role: 'system',
         content: generateSystemPrompt([]),
       });
-    } else if (provider === 'Anthropic') {
-      // Anthropic uses a top-level "system" field that we add later in callLLM,
-      // but we still keep the message in history so the array stays aligned.
-      providerMessagesRef.current.push({
-        role: 'system',
-        content: generateSystemPrompt([]),
-      });
-    } else if (provider === 'Google') {
-      // Gemini requests are built from scratch in callLLM; we still record the
-      // prompt here for completeness / export features.
-      providerMessagesRef.current.push({
-        role: 'system',
-        content: generateSystemPrompt([]),
-      });
     }
+    // For Anthropic, don't push system message to messages array - use top-level system field
+    // For Google, Gemini requests are built from scratch in callLLM
   
     /* 2️⃣  Show a friendly greeting to the user */
     setMessages([
@@ -331,14 +319,17 @@ export const MCPClient = () => {
       const body: any = {
         apiKey: getCurrentApiKey(),
         model: selectedModel,
-        messages: providerMessagesRef.current,
+        messages: providerMessagesRef.current.filter(msg => 
+          provider === 'Anthropic' ? msg.role !== 'system' : true
+        ),
         maxTokens: 1000,
         tools,
         stream: true
       };
 
-      // Add input token caching for Claude
+      // Add system prompt as top-level field for Anthropic
       if (provider === 'Anthropic') {
+        body.system = generateSystemPrompt(mcpTools);
         body.extra_headers = {
           "anthropic-beta": "prompt-caching-2024-07-31"
         };
@@ -888,15 +879,34 @@ export const MCPClient = () => {
         // Tool call error is shown by the ToolCallIndicator component
       }
 
-      // Immediately push tool result to provider history
-      if (provider === 'OpenAI') {
-        providerMessagesRef.current.push({ role: 'tool', tool_call_id: tc.id, content: tc.result ?? tc.error });
-      } else if (provider === 'Anthropic') {
-        providerMessagesRef.current.push({
-          role: 'user',
-          content: [{ type: 'tool_result', tool_use_id: tc.id, content: tc.result ?? tc.error }]
+    }
+
+    // Batch tool results for provider-specific handling
+    const resultsForClaude: any[] = [];
+
+    // Collect results for Anthropic (batched) or push individually for OpenAI
+    for (const tc of toolCalls) {
+      if (selectedProvider.name === 'OpenAI') {
+        providerMessagesRef.current.push({ 
+          role: 'tool', 
+          tool_call_id: tc.id, 
+          content: tc.result ?? tc.error ?? ''
+        });
+      } else if (selectedProvider.name === 'Anthropic') {
+        resultsForClaude.push({
+          type: 'tool_result',
+          tool_use_id: tc.id,
+          content: tc.result ?? tc.error ?? ''
         });
       }
+    }
+
+    // For Anthropic, push one user message with all tool results
+    if (selectedProvider.name === 'Anthropic' && resultsForClaude.length > 0) {
+      providerMessagesRef.current.push({
+        role: 'user',
+        content: resultsForClaude
+      });
     }
 
     setActiveToolCall(null);
@@ -925,6 +935,9 @@ export const MCPClient = () => {
   /* ────────────── BUILD PROVIDER USER MESSAGE UTIL ──────────────────── */
   const buildProviderUserMessage = (text: string, images: string[]) => {
     const provider = selectedProvider.name;
+    if (provider === 'Anthropic') {
+      return { role: 'user', content: [{ type: 'text', text }] };
+    }
     if (provider === 'OpenAI' && images.length) {
       return {
         role: 'user',
