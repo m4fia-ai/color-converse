@@ -30,7 +30,7 @@ interface ToolCall {
   args: any;
   result?: any;
   error?: string;
-  status: 'pending' | 'success' | 'error';
+  status: 'pending' | 'success' | 'error' | 'paused';
   startTime?: Date;
   endTime?: Date;
 }
@@ -270,9 +270,12 @@ export const MCPClient = () => {
 
   /* ────────────────────────── SEND MESSAGE ──────────────────────────── */
   const sendMessage = async () => {
-    if ((!inputMessage.trim() && selectedImages.length === 0) || isLoading || isPaused) return;
+    if ((!inputMessage.trim() && selectedImages.length === 0) || isLoading) return;
     const currentApiKey = getCurrentApiKey();
     if (!currentApiKey) return toast({ title: `Missing ${selectedProvider.name} API key`, variant: 'destructive' });
+
+    // Reset pause state when starting new conversation
+    setIsPaused(false);
 
     // 1️⃣ Update UI & provider histories ---------------------------------
     const uiMsg: Message = {
@@ -394,6 +397,19 @@ export const MCPClient = () => {
 
     try {
       while (true) {
+        // Check if paused during streaming
+        if (isPaused) {
+          reader.cancel();
+          setMessages(prev => 
+            prev.map(m => 
+              m.id === streamingId 
+                ? { ...m, isStreaming: false, content: fullText + '\n\n*[Chat paused by user]*' }
+                : m
+            )
+          );
+          return;
+        }
+
         const { value, done } = await reader.read();
         if (done) break;
         buffer += value;
@@ -651,14 +667,14 @@ export const MCPClient = () => {
 
   // Remove this function as it was causing empty message boxes
 
-  const appendCampaignSummary = (items: any[]) => {
+  const appendCampaignSummary = (items: any[], title: string) => {
     setMessages(prev => [
       ...prev,
       { 
         id: `summary-${Date.now()}`, 
         role: 'assistant', 
         content: '',
-        summary: { items, title: 'Campaign Creation Summary' },
+        summary: { items, title },
         timestamp: new Date() 
       }
     ]);
@@ -667,6 +683,7 @@ export const MCPClient = () => {
   /* ───────────────────── CAMPAIGN SUMMARY PARSER ─────────────────────── */
   const parseCampaignResults = (toolCalls: ToolCall[]) => {
     const campaignItems: any[] = [];
+    let summaryTitle = 'Creation Summary';
     
     toolCalls.forEach(tc => {
       if (tc.result && tc.status === 'success') {
@@ -674,37 +691,40 @@ export const MCPClient = () => {
           const result = typeof tc.result === 'string' ? JSON.parse(tc.result) : tc.result;
           
           // Check for campaign creation
-          if (tc.name.includes('campaign') && result.campaign_id) {
+          if (tc.name.includes('campaign') && (result.campaign_id || result.id)) {
             campaignItems.push({
               type: 'campaign',
-              name: tc.args.campaign_name || 'New Campaign',
-              id: result.campaign_id,
+              name: tc.args.campaign_name || tc.args.name || 'New Campaign',
+              id: result.campaign_id || result.id,
               status: result.status || 'ACTIVE',
               budget: tc.args.daily_budget ? `$${tc.args.daily_budget}/day` : undefined
             });
+            summaryTitle = 'Campaign Creation Summary';
           }
           
           // Check for adset creation
           if (tc.name.includes('adset') && (result.adset_id || result.id || result.resource_id)) {
             campaignItems.push({
               type: 'adset',
-              name: tc.args.adset_name || 'New Ad Set',
+              name: tc.args.adset_name || tc.args.name || tc.args.ad_set_name || 'New Ad Set',
               id: result.adset_id || result.id || result.resource_id,
               status: result.status || 'ACTIVE',
               budget: tc.args.budget ? `$${tc.args.budget}` : undefined,
               targeting: tc.args.targeting ? JSON.stringify(tc.args.targeting).slice(0, 50) + '...' : undefined
             });
+            summaryTitle = 'Ad Set Creation Summary';
           }
           
           // Check for ad creation
-          if (tc.name.includes('ad') && result.ad_id) {
+          if (tc.name.includes('ad') && !tc.name.includes('adset') && (result.ad_id || result.id)) {
             campaignItems.push({
               type: 'ad',
-              name: tc.args.ad_name || 'New Ad',
-              id: result.ad_id,
+              name: tc.args.ad_name || tc.args.name || 'New Ad',
+              id: result.ad_id || result.id,
               status: result.status || 'ACTIVE',
-              creative: tc.args.creative_type || undefined
+              creative: tc.args.creative_type || tc.args.image_url ? 'Image/Video' : undefined
             });
+            summaryTitle = 'Ad Creation Summary';
           }
         } catch (e) {
           console.warn('Failed to parse tool result for campaign summary:', e);
@@ -712,17 +732,23 @@ export const MCPClient = () => {
       }
     });
     
-    return campaignItems;
+    return { items: campaignItems, title: summaryTitle };
   };
 
   /* ────────────────────────── TOOL EXECUTION ─────────────────────────── */
   const executeToolCalls = async (toolCalls: ToolCall[]) => {
-    if (isPaused) return;
     const provider = selectedProvider.name;
 
     // Tool call indicators are handled by the ToolCallIndicator component
 
     for (const tc of toolCalls) {
+      // Check if paused before each tool execution
+      if (isPaused) {
+        tc.status = 'paused';
+        setMessages(prev => [...prev]); // Force update
+        return;
+      }
+
       setActiveToolCall(tc.id);
       updateToolCallStatus(tc.id, 'pending');
       tc.startTime = new Date();
@@ -738,6 +764,13 @@ export const MCPClient = () => {
         }
 
         const result = await mcpClientRef.current.callTool(tc.name, toolArgs);
+        
+        // Check if paused after tool execution
+        if (isPaused) {
+          tc.status = 'paused';
+          setMessages(prev => [...prev]); // Force update
+          return;
+        }
         
         // Extract session_id from the first tool call response
         if (!sessionId && result) {
@@ -842,10 +875,13 @@ export const MCPClient = () => {
 
     setActiveToolCall(null);
 
-    // Check for campaign/adset/ad creations and show summary
-    const campaignItems = parseCampaignResults(toolCalls);
-    if (campaignItems.length > 0) {
-      appendCampaignSummary(campaignItems);
+    // Only parse results if not paused
+    if (!isPaused) {
+      // Check for campaign/adset/ad creations and show summary
+      const { items: campaignItems, title } = parseCampaignResults(toolCalls);
+      if (campaignItems.length > 0) {
+        appendCampaignSummary(campaignItems, title);
+      }
     }
 
     // 🔁 Ask the LLM again so it can weave results into a final response
