@@ -43,6 +43,7 @@ interface Message {
   toolCalls?: ToolCall[];
   timestamp: Date;
   isStreaming?: boolean;
+  summary?: { items: any[]; title: string };
 }
 
 interface ConnectionLog {
@@ -655,7 +656,8 @@ export const MCPClient = () => {
       { 
         id: `summary-${Date.now()}`, 
         role: 'assistant', 
-        content: `<CampaignSummaryTable items='${JSON.stringify(items)}' title="Campaign Creation Summary" />`, 
+        content: '',
+        summary: { items, title: 'Campaign Creation Summary' },
         timestamp: new Date() 
       }
     ]);
@@ -682,11 +684,11 @@ export const MCPClient = () => {
           }
           
           // Check for adset creation
-          if (tc.name.includes('adset') && result.adset_id) {
+          if (tc.name.includes('adset') && (result.adset_id || result.id || result.resource_id)) {
             campaignItems.push({
               type: 'adset',
               name: tc.args.adset_name || 'New Ad Set',
-              id: result.adset_id,
+              id: result.adset_id || result.id || result.resource_id,
               status: result.status || 'ACTIVE',
               budget: tc.args.budget ? `$${tc.args.budget}` : undefined,
               targeting: tc.args.targeting ? JSON.stringify(tc.args.targeting).slice(0, 50) + '...' : undefined
@@ -785,19 +787,26 @@ export const MCPClient = () => {
           }
         }
         
-        // Extract text content from result.content if it's an array of objects
-        let processedResult = result.content;
-        if (Array.isArray(result.content)) {
-          processedResult = result.content
-            .map((item: any) => {
-              if (typeof item === 'object' && item.type === 'text' && item.text) {
-                return item.text;
-              }
-              return typeof item === 'string' ? item : JSON.stringify(item);
-            })
-            .join('\n');
-        } else if (typeof result.content === 'object') {
-          processedResult = JSON.stringify(result.content);
+        // Extract a displayable payload robustly
+        let processedResult: any;
+
+        if (result && 'content' in result && result.content !== undefined) {
+          // Handle Anthropic/OpenAI-like payloads
+          if (Array.isArray(result.content)) {
+            processedResult = result.content
+              .map((item: any) => {
+                if (typeof item === 'object' && item.type === 'text' && item.text) return item.text;
+                return typeof item === 'string' ? item : JSON.stringify(item);
+              })
+              .join('\n');
+          } else if (typeof result.content === 'object') {
+            processedResult = JSON.stringify(result.content);
+          } else {
+            processedResult = String(result.content ?? '');
+          }
+        } else {
+          // Fallback: whole object is the payload (what your adset call returns)
+          processedResult = typeof result === 'string' ? result : JSON.stringify(result);
         }
         
         tc.result = processedResult;
@@ -1103,7 +1112,8 @@ export const MCPClient = () => {
             {messages.filter(msg => 
               msg.content?.trim() || 
               (msg.toolCalls && msg.toolCalls.length > 0) || 
-              msg.isStreaming
+              msg.isStreaming ||
+              msg.summary
             ).map((msg) => (
               <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
@@ -1124,6 +1134,13 @@ export const MCPClient = () => {
                     
                     {msg.content && (
                       <MarkdownRenderer content={msg.content} />
+                    )}
+                    
+                    {msg.summary && (
+                      <CampaignSummaryTable
+                        items={msg.summary.items}
+                        title={msg.summary.title}
+                      />
                     )}
                     
                     {msg.toolCalls && msg.toolCalls.length > 0 && (
