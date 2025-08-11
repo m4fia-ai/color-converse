@@ -23,10 +23,10 @@ export const CampaignSummaryTable = ({ items, title }: CampaignSummaryTableProps
 
   const getTypeColor = (type: string) => {
     switch (type) {
-      case 'campaign': return 'bg-primary/20 text-primary-foreground border-primary/30';
-      case 'adset': return 'bg-tertiary/20 text-tertiary-foreground border-tertiary/30';
-      case 'ad': return 'bg-secondary/20 text-secondary-foreground border-secondary/30';
-      default: return 'bg-muted text-muted-foreground border-border';
+      case 'campaign': return 'border-primary/40 text-foreground';
+      case 'adset': return 'border-purple-400/40 text-foreground';
+      case 'ad': return 'border-secondary/40 text-foreground';
+      default: return 'border-white/40 text-foreground';
     }
   };
 

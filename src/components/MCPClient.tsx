@@ -111,6 +111,8 @@ export const MCPClient = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const didInitRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const abortedRef = useRef(false);
   const { toast } = useToast();
   const [serverUrl] = useState('https://redis-hosted-mcp-server-production.up.railway.app/mcp');
 
@@ -297,11 +299,24 @@ export const MCPClient = () => {
     await callLLM();
   };
 
+  // Call this to stop the current run
+  const stopCurrentRun = () => {
+    abortedRef.current = true;
+    abortRef.current?.abort();           // abort fetch
+    setIsPaused(true);
+    setIsLoading(false);
+    addLog('info', 'Generation stopped by user');
+  };
+
   /* ──────────────────────── LLM CALL WRAPPER ─────────────────────────── */
   const callLLM = async () => {
     setIsLoading(true);
+    abortedRef.current = false;
     try {
       const provider = selectedProvider.name;
+
+      // NEW: create controller and pass signal to fetch
+      abortRef.current = new AbortController();
 
       // Prepare tools payload if available
       let tools: any[] | undefined;
@@ -340,7 +355,8 @@ export const MCPClient = () => {
             'Accept-Encoding': 'identity'
           } : {})
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: abortRef.current.signal,        // 👈 important
       });
 
       if (!resp.ok) {
@@ -364,6 +380,7 @@ export const MCPClient = () => {
 
       // Fallback to non-streaming
       const data = await resp.json();
+      if (abortedRef.current) return;           // don't update UI after stop
 
       // Handle Google response format differently
       if (provider === 'Google') {
@@ -374,10 +391,14 @@ export const MCPClient = () => {
 
       await handleLLMResponse(data);
     } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        addLog('info', 'Fetch aborted by user');
+        return; // silent
+      }
       toast({ title: 'LLM Error', description: e.message ?? String(e), variant: 'destructive' });
       addLog('error', e.message ?? String(e));
     } finally {
-      setIsLoading(false);
+      if (!abortedRef.current) setIsLoading(false);
     }
   };
 
@@ -397,17 +418,9 @@ export const MCPClient = () => {
 
     try {
       while (true) {
-        // Check if paused during streaming
-        if (isPaused) {
-          reader.cancel();
-          setMessages(prev => 
-            prev.map(m => 
-              m.id === streamingId 
-                ? { ...m, isStreaming: false, content: fullText + '\n\n*[Chat paused by user]*' }
-                : m
-            )
-          );
-          return;
+        if (abortedRef.current) {
+          try { await reader.cancel(); } catch {}
+          return;                          // 👈 leave immediately
         }
 
         const { value, done } = await reader.read();
@@ -682,57 +695,70 @@ export const MCPClient = () => {
 
   /* ───────────────────── CAMPAIGN SUMMARY PARSER ─────────────────────── */
   const parseCampaignResults = (toolCalls: ToolCall[]) => {
-    const campaignItems: any[] = [];
-    let summaryTitle = 'Creation Summary';
-    
-    toolCalls.forEach(tc => {
-      if (tc.result && tc.status === 'success') {
-        try {
-          const result = typeof tc.result === 'string' ? JSON.parse(tc.result) : tc.result;
-          
-          // Check for campaign creation
-          if (tc.name.includes('campaign') && (result.campaign_id || result.id)) {
-            campaignItems.push({
-              type: 'campaign',
-              name: tc.args.campaign_name || tc.args.name || 'New Campaign',
-              id: result.campaign_id || result.id,
-              status: result.status || 'ACTIVE',
-              budget: tc.args.daily_budget ? `$${tc.args.daily_budget}/day` : undefined
-            });
-            summaryTitle = 'Campaign Creation Summary';
-          }
-          
-          // Check for adset creation
-          if (tc.name.includes('adset') && (result.adset_id || result.id || result.resource_id)) {
-            campaignItems.push({
-              type: 'adset',
-              name: tc.args.adset_name || tc.args.name || tc.args.ad_set_name || 'New Ad Set',
-              id: result.adset_id || result.id || result.resource_id,
-              status: result.status || 'ACTIVE',
-              budget: tc.args.budget ? `$${tc.args.budget}` : undefined,
-              targeting: tc.args.targeting ? JSON.stringify(tc.args.targeting).slice(0, 50) + '...' : undefined
-            });
-            summaryTitle = 'Ad Set Creation Summary';
-          }
-          
-          // Check for ad creation
-          if (tc.name.includes('ad') && !tc.name.includes('adset') && (result.ad_id || result.id)) {
-            campaignItems.push({
-              type: 'ad',
-              name: tc.args.ad_name || tc.args.name || 'New Ad',
-              id: result.ad_id || result.id,
-              status: result.status || 'ACTIVE',
-              creative: tc.args.creative_type || tc.args.image_url ? 'Image/Video' : undefined
-            });
-            summaryTitle = 'Ad Creation Summary';
-          }
-        } catch (e) {
-          console.warn('Failed to parse tool result for campaign summary:', e);
+    const items: any[] = [];
+
+    const pick = (obj: any, paths: string[]) => {
+      for (const p of paths) {
+        const v = p.split('.').reduce((o, k) => (o && k in o ? o[k] : undefined), obj);
+        if (v !== undefined && v !== null && v !== '') return v;
+      }
+      return undefined;
+    };
+
+    for (const tc of toolCalls) {
+      if (!(tc.result && tc.status === 'success')) continue;
+
+      const raw = typeof tc.result === 'string' ? (() => { try { return JSON.parse(tc.result); } catch { return {}; } })() : tc.result;
+
+      // --- Campaign ---
+      if (tc.name.toLowerCase().includes('campaign') && (pick(raw, ['campaign_id','id','campaign_details.id']))) {
+        items.push({
+          type: 'campaign',
+          name: pick(raw, ['campaign_details.name', 'name', 'campaign_name']) ?? 'New Campaign',
+          id:   pick(raw, ['campaign_id', 'campaign_details.id', 'id']),
+          status: pick(raw, ['campaign_details.status', 'status']) ?? 'ACTIVE',
+          budget: pick(raw, ['campaign_details.daily_budget']) ?? (tc.args?.daily_budget ? `${tc.args.daily_budget}/day` : undefined),
+        });
+        continue;
+      }
+
+      // --- Ad Set ---
+      if (tc.name.toLowerCase().includes('adset') || tc.name.toLowerCase().includes('ad_set')) {
+        const id = pick(raw, ['adset_id','resource_id','id']);
+        if (id) {
+          items.push({
+            type: 'adset',
+            name: pick(raw, ['adset_details.name','details.name','name','adset_name','ad_set_name']) ?? 'New Ad Set',
+            id,
+            status: pick(raw, ['adset_details.status','status']) ?? 'ACTIVE',
+            budget: pick(tc.args ?? {}, ['budget']) ? `${tc.args.budget}` : undefined,
+            targeting: tc.args?.targeting ? JSON.stringify(tc.args.targeting).slice(0, 80) + '…' : undefined,
+          });
+        }
+        continue;
+      }
+
+      // --- Ad ---
+      if (tc.name.toLowerCase().includes('ad') && !tc.name.toLowerCase().includes('adset')) {
+        const id = pick(raw, ['ad_id','id']);
+        if (id) {
+          items.push({
+            type: 'ad',
+            name: pick(raw, ['ad_details.name','name','ad_name']) ?? 'New Ad',
+            id,
+            status: pick(raw, ['ad_details.status','status']) ?? 'ACTIVE',
+            creative: tc.args?.creative_type || (tc.args?.image_url || tc.args?.video_url ? 'Image/Video' : undefined),
+          });
         }
       }
-    });
-    
-    return { items: campaignItems, title: summaryTitle };
+    }
+
+    // Title: if all same type, use that; else generic
+    const types = new Set(items.map(i => i.type));
+    const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+    const title = types.size === 1 ? `${cap([...types][0])} Creation Summary` : 'Creation Summary';
+
+    return { items, title };
   };
 
   /* ────────────────────────── TOOL EXECUTION ─────────────────────────── */
@@ -742,8 +768,8 @@ export const MCPClient = () => {
     // Tool call indicators are handled by the ToolCallIndicator component
 
     for (const tc of toolCalls) {
-      // Check if paused before each tool execution
-      if (isPaused) {
+      // Check if aborted before each tool execution
+      if (abortedRef.current) {
         tc.status = 'paused';
         setMessages(prev => [...prev]); // Force update
         return;
@@ -765,8 +791,8 @@ export const MCPClient = () => {
 
         const result = await mcpClientRef.current.callTool(tc.name, toolArgs);
         
-        // Check if paused after tool execution
-        if (isPaused) {
+        // Check if aborted after tool execution
+        if (abortedRef.current) {
           tc.status = 'paused';
           setMessages(prev => [...prev]); // Force update
           return;
@@ -875,8 +901,8 @@ export const MCPClient = () => {
 
     setActiveToolCall(null);
 
-    // Only parse results if not paused
-    if (!isPaused) {
+    // Only parse results if not aborted
+    if (!abortedRef.current) {
       // Check for campaign/adset/ad creations and show summary
       const { items: campaignItems, title } = parseCampaignResults(toolCalls);
       if (campaignItems.length > 0) {
@@ -1331,14 +1357,23 @@ export const MCPClient = () => {
                 <Paperclip className="w-4 h-4" />
               </Button>
               
-              <Button 
-                onClick={() => setIsPaused(!isPaused)}
+              <Button
                 variant="outline"
                 size="sm"
                 className="flex-shrink-0 border-primary text-primary"
-                title={isPaused ? "Resume chat" : "Pause chat"}
+                title={isLoading ? "Stop" : (isPaused ? "Resume" : "Pause")}
+                onClick={() => {
+                  if (isLoading) return stopCurrentRun(); // ⛔️ stop current run
+                  if (isPaused) {
+                    setIsPaused(false);
+                    // optional: immediately let the model continue its reasoning now
+                    callLLM();
+                  } else {
+                    setIsPaused(true); // just prevent new input
+                  }
+                }}
               >
-                {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                {isLoading ? <Pause className="h-4 w-4" /> : (isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />)}
               </Button>
               
                <Textarea
