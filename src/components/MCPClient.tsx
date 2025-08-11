@@ -673,12 +673,12 @@ export const MCPClient = () => {
             }
           }
         } catch (e) {
-          if (String(e) === '__STREAM_END__') break; // exits outer while
+          if ((e as any)?.message === '__STREAM_END__' || String(e).includes('__STREAM_END__')) break; // exits outer while
           throw e;
         }
       }
     } catch (error) {
-      if (String(error) !== '__STREAM_END__') {
+      if ((error as any)?.message !== '__STREAM_END__' && !String(error).includes('__STREAM_END__')) {
         console.error('Streaming error:', error);
         setMessages(prev => prev.filter(m => m.id !== streamingId));
         toast({ title: 'Streaming error', description: 'Connection interrupted', variant: 'destructive' });
