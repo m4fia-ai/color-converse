@@ -7,7 +7,6 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
 import { visit } from 'unist-util-visit';
-import { defaultSchema } from 'rehype-sanitize';
 import { ToolCallIndicator } from './ToolCallIndicator';
 import { CampaignSummaryTable } from './CampaignSummaryTable';
 
@@ -30,21 +29,23 @@ const rehypeExternalLinks = () => {
 
 // Enhanced sanitize schema that preserves list styling
 const enhancedSanitizeSchema = {
-  ...defaultSchema,
   attributes: {
-    ...defaultSchema.attributes,
-    '*': [...(defaultSchema.attributes['*'] || []), 'className', 'style'],
-    a: [...(defaultSchema.attributes.a || []), 'target', 'rel'],
+    '*': ['className', 'style'],
+    a: ['href', 'target', 'rel'],
     ol: ['start', 'type', 'reversed'],
-    li: ['value']
+    li: ['value'],
+    div: ['dataComponentId'],
+    span: []
   },
   tagNames: [
-    ...defaultSchema.tagNames,
-    'ol',
-    'ul', 
-    'li',
-    'div',
-    'span'
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'p', 'br', 'strong', 'em', 'b', 'i', 'u',
+    'ol', 'ul', 'li',
+    'a', 'code', 'pre',
+    'blockquote',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    'div', 'span',
+    'hr'
   ]
 };
 
