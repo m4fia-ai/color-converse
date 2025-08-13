@@ -154,22 +154,59 @@ All colors MUST be HSL.
   }
 }
 
-/* Markdown Table Styles */
-/* User message tables - darker text */
-.bg-primary .markdown-table th {
+/* Markdown Content Styles */
+/* User message content - darker text */
+.bg-primary .markdown-content ol,
+.bg-primary .markdown-content ul,
+.bg-primary .markdown-content li,
+.bg-primary .markdown-content p {
   color: hsl(0, 0%, 15%);
 }
 
-.bg-primary .markdown-table td {
+.bg-primary .markdown-content th {
   color: hsl(0, 0%, 15%);
 }
 
-.bg-primary .markdown-table p {
+.bg-primary .markdown-content td {
   color: hsl(0, 0%, 15%);
+}
+
+/* List styling */
+.markdown-content ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+.markdown-content ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+.markdown-content li {
+  margin: 0.25rem 0;
+  padding-left: 0.25rem;
+}
+
+.markdown-content ol ol {
+  list-style-type: lower-alpha;
+}
+
+.markdown-content ol ol ol {
+  list-style-type: lower-roman;
+}
+
+.markdown-content ul ul {
+  list-style-type: circle;
+}
+
+.markdown-content ul ul ul {
+  list-style-type: square;
 }
 
 /* AI message tables - bright text */
-.markdown-table table {
+.markdown-content table {
   border-collapse: separate;
   border-spacing: 0;
   width: 100%;
@@ -182,7 +219,7 @@ All colors MUST be HSL.
   font-size: 14px;
 }
 
-.markdown-table th {
+.markdown-content th {
   background-color: transparent;
   font-weight: 600;
   text-align: left;
@@ -194,12 +231,12 @@ All colors MUST be HSL.
   font-size: 14px;
 }
 
-.markdown-table th:first-child { border-top-left-radius: 0.75rem; }
-.markdown-table th:last-child { border-top-right-radius: 0.75rem; }
-.markdown-table tr:last-child td:first-child { border-bottom-left-radius: 0.75rem; }
-.markdown-table tr:last-child td:last-child { border-bottom-right-radius: 0.75rem; }
+.markdown-content th:first-child { border-top-left-radius: 0.75rem; }
+.markdown-content th:last-child { border-top-right-radius: 0.75rem; }
+.markdown-content tr:last-child td:first-child { border-bottom-left-radius: 0.75rem; }
+.markdown-content tr:last-child td:last-child { border-bottom-right-radius: 0.75rem; }
 
-.markdown-table td {
+.markdown-content td {
   padding: 1rem;
   border: 1px solid hsl(0, 0%, 83%);
   vertical-align: middle;
@@ -211,29 +248,44 @@ All colors MUST be HSL.
   font-variant-numeric: tabular-nums;
 }
 
-.markdown-table tr:hover td { background-color: rgba(0, 0, 0, 0.4); }
+.markdown-content tr:hover td { background-color: rgba(0, 0, 0, 0.4); }
 
-.markdown-table p { margin: 0; font-size: 14px; line-height: 1.5; color: hsl(0, 0%, 95%); }
+.markdown-content p { margin: 0.5rem 0; font-size: 14px; line-height: 1.5; color: hsl(0, 0%, 95%); }
 
-/* Dark mode overrides */
-.dark .markdown-table table { background-color: rgba(0, 0, 0, 0.3); }
-.dark .markdown-table th { color: hsl(0, 0%, 90%); border-color: hsl(0, 0%, 32%); }
-.dark .markdown-table td { color: hsl(0, 0%, 90%); border-color: hsl(0, 0%, 32%); }
-.dark .markdown-table tr:hover td { background-color: rgba(0, 0, 0, 0.4); }
-.dark .markdown-table p { color: hsl(0, 0%, 90%); }
+/* Typography */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin: 1rem 0 0.5rem 0;
+  font-weight: 600;
+}
+
+.markdown-content h1 { font-size: 1.5rem; }
+.markdown-content h2 { font-size: 1.25rem; }
+.markdown-content h3 { font-size: 1.125rem; }
 
 /* Links, code, strong, etc. */
-.markdown-table strong { font-weight: 600; letter-spacing: -0.01em; }
-.markdown-table a { color: hsl(217, 91%, 60%); text-decoration: none; font-weight: 500; }
-.dark .markdown-table a { color: hsl(213, 94%, 68%); }
-.markdown-table code {
+.markdown-content strong { font-weight: 600; letter-spacing: -0.01em; }
+.markdown-content a { color: hsl(217, 91%, 60%); text-decoration: none; font-weight: 500; }
+.markdown-content code {
   background-color: hsl(0, 0%, 83%);
   padding: 0.2rem 0.4rem;
   border-radius: 0.25rem;
   font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   font-size: 14px;
 }
-.dark .markdown-table code { background-color: hsl(0, 0%, 32%); }
+
+/* Dark mode overrides */
+.dark .markdown-content table { background-color: rgba(0, 0, 0, 0.3); }
+.dark .markdown-content th { color: hsl(0, 0%, 90%); border-color: hsl(0, 0%, 32%); }
+.dark .markdown-content td { color: hsl(0, 0%, 90%); border-color: hsl(0, 0%, 32%); }
+.dark .markdown-content tr:hover td { background-color: rgba(0, 0, 0, 0.4); }
+.dark .markdown-content p { color: hsl(0, 0%, 90%); }
+.dark .markdown-content a { color: hsl(213, 94%, 68%); }
+.dark .markdown-content code { background-color: hsl(0, 0%, 32%); }
 
 @layer base {
   * {

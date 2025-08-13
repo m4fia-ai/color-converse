@@ -6,12 +6,47 @@ import remarkRehype from 'remark-rehype';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
+import { visit } from 'unist-util-visit';
+import { defaultSchema } from 'rehype-sanitize';
 import { ToolCallIndicator } from './ToolCallIndicator';
 import { CampaignSummaryTable } from './CampaignSummaryTable';
 
 interface MarkdownRendererProps {
   content: string;
 }
+
+// Custom rehype plugin to make links open in new tab
+const rehypeExternalLinks = () => {
+  return (tree: any) => {
+    visit(tree, 'element', (node) => {
+      if (node.tagName === 'a') {
+        node.properties = node.properties || {};
+        node.properties.target = '_blank';
+        node.properties.rel = 'noopener noreferrer';
+      }
+    });
+  };
+};
+
+// Enhanced sanitize schema that preserves list styling
+const enhancedSanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    '*': [...(defaultSchema.attributes['*'] || []), 'className', 'style'],
+    a: [...(defaultSchema.attributes.a || []), 'target', 'rel'],
+    ol: ['start', 'type', 'reversed'],
+    li: ['value']
+  },
+  tagNames: [
+    ...defaultSchema.tagNames,
+    'ol',
+    'ul', 
+    'li',
+    'div',
+    'span'
+  ]
+};
 
 export const MarkdownRenderer = ({ content }: MarkdownRendererProps) => {
   const [processedContent, setProcessedContent] = useState('');
@@ -73,7 +108,8 @@ export const MarkdownRenderer = ({ content }: MarkdownRendererProps) => {
           .use(remarkGfm)
           .use(remarkRehype, { allowDangerousHtml: true })
           .use(rehypeRaw)
-          .use(rehypeSanitize)
+          .use(rehypeExternalLinks) // Add our custom plugin for external links
+          .use(rehypeSanitize, enhancedSanitizeSchema) // Use enhanced schema
           .use(rehypeStringify)
           .process(processedText);
 
@@ -102,7 +138,7 @@ export const MarkdownRenderer = ({ content }: MarkdownRendererProps) => {
 
   return (
     <div className="overflow-x-auto">
-      <div className="prose prose-sm max-w-none dark:prose-invert markdown-table">
+      <div className="prose prose-sm max-w-none dark:prose-invert markdown-content">
         {renderWithComponents(processedContent)}
       </div>
     </div>
