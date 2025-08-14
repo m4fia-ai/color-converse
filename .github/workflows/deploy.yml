@@ -62,31 +62,31 @@ jobs:
         passphrase: ${{ secrets.SSH_PASSPHRASE }}
         script: |
           # Login to Docker Hub with personal access token
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          echo "${{ secrets.DOCKER_PASSWORD }}" | sudo docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
           
           # Stop and remove existing container if running
-          docker stop my-app-container 2>/dev/null || true
-          docker rm my-app-container 2>/dev/null || true
+          sudo docker stop my-app-container 2>/dev/null || true
+          sudo docker rm my-app-container 2>/dev/null || true
           
           # Pull the latest image from Docker Hub (using the new version tag)
-          docker pull ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}:${{ steps.version.outputs.new_tag }}
+          sudo docker pull ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}:${{ steps.version.outputs.new_tag }}
           
           # Run the new container on port 3000
-          docker run -d \
+          sudo docker run -d \
             --name my-app-container \
             -p 3000:3000 \
             --restart unless-stopped \
             ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}:${{ steps.version.outputs.new_tag }}
           
           # Clean up unused images to save space
-          docker image prune -f
+          sudo docker image prune -f
           
           # Verify container is running
-          docker ps | grep my-app-container
+          sudo docker ps | grep my-app-container
           
           # Show container logs for verification
           echo "Container logs:"
-          docker logs my-app-container --tail 20
+          sudo docker logs my-app-container --tail 20
     
     - name: Update version tag in repository
       env:
