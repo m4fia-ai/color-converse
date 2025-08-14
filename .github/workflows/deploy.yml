@@ -1,0 +1,117 @@
+name: Deploy to GCP VM
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Calculate new version
+      id: version
+      run: |
+        # Get current tag from secrets (e.g., "0.1")
+        CURRENT_TAG="${{ secrets.DOCKER_TAG }}"
+        echo "Current tag: $CURRENT_TAG"
+        
+        # Extract major and minor version numbers
+        MAJOR=$(echo $CURRENT_TAG | cut -d'.' -f1)
+        MINOR=$(echo $CURRENT_TAG | cut -d'.' -f2)
+        
+        # Increment minor version
+        NEW_MINOR=$((MINOR + 1))
+        NEW_TAG="${MAJOR}.${NEW_MINOR}"
+        
+        echo "New tag: $NEW_TAG"
+        echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+        echo "current_tag=$CURRENT_TAG" >> $GITHUB_OUTPUT
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}:${{ steps.version.outputs.new_tag }}
+          ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    
+    - name: Deploy to VM
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.VM_HOST }}
+        username: ${{ secrets.VM_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        passphrase: ${{ secrets.SSH_PASSPHRASE }}
+        script: |
+          # Login to Docker Hub with personal access token
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          
+          # Stop and remove existing container if running
+          docker stop my-app-container 2>/dev/null || true
+          docker rm my-app-container 2>/dev/null || true
+          
+          # Pull the latest image from Docker Hub (using the new version tag)
+          docker pull ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}:${{ steps.version.outputs.new_tag }}
+          
+          # Run the new container on port 3000
+          docker run -d \
+            --name my-app-container \
+            -p 3000:3000 \
+            --restart unless-stopped \
+            ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}:${{ steps.version.outputs.new_tag }}
+          
+          # Clean up unused images to save space
+          docker image prune -f
+          
+          # Verify container is running
+          docker ps | grep my-app-container
+          
+          # Show container logs for verification
+          echo "Container logs:"
+          docker logs my-app-container --tail 20
+    
+    - name: Update version tag in repository
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # Create and push a git tag for the new version
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git tag -a "v${{ steps.version.outputs.new_tag }}" -m "Release version ${{ steps.version.outputs.new_tag }}"
+        git push origin "v${{ steps.version.outputs.new_tag }}"
+    
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ steps.version.outputs.new_tag }}
+        release_name: Release v${{ steps.version.outputs.new_tag }}
+        body: |
+          ## Changes in v${{ steps.version.outputs.new_tag }}
+          
+          - Automated deployment from commit ${{ github.sha }}
+          - Docker image: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}:${{ steps.version.outputs.new_tag }}
+          
+          **Previous version:** ${{ steps.version.outputs.current_tag }}
+          **New version:** ${{ steps.version.outputs.new_tag }}
+        draft: false
+        prerelease: false
