@@ -27,9 +27,18 @@ serve(async (req) => {
     const body: any = {
       model,
       messages,
-      max_tokens: maxTokens,
       stream
     };
+
+    // Use correct token parameter based on model
+    const isNewerModel = model.startsWith('gpt-5') || model.startsWith('gpt-4.1') || model.startsWith('o3') || model.startsWith('o4');
+    if (isNewerModel) {
+      body.max_completion_tokens = maxTokens;
+      // Don't include temperature for newer models - they don't support it
+    } else {
+      body.max_tokens = maxTokens;
+      body.temperature = 0.7; // Only for legacy models
+    }
 
     // Add tools if provided
     if (tools && tools.length > 0) {
@@ -54,16 +63,19 @@ serve(async (req) => {
       )
     }
 
-    // Handle streaming response
-    if (stream) {
+    // Handle streaming response with proper SSE headers
+    if (stream && response.body) {
+      console.log('Streaming response detected, setting up proper SSE');
+      
       return new Response(response.body, {
         headers: { 
           ...corsHeaders, 
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive'
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no', // Disable nginx buffering
         }
-      })
+      });
     }
 
     const data = await response.json()
@@ -73,7 +85,15 @@ serve(async (req) => {
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
-    console.error('OpenAI proxy error:', error)
+    console.error('OpenAI proxy error:', error);
+    
+    // Log the full error details for debugging
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

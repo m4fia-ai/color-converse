@@ -411,6 +411,9 @@ export const MCPClient = () => {
 
       const ct = resp.headers.get('content-type') || '';
       addLog('info', `LLM response content-type: ${ct}, status: ${resp.status}`);
+      if (!ct.includes('text/event-stream')) {
+        addLog('warning', 'Not an SSE response; streaming may be buffered by the proxy.');
+      }
 
       // Force streaming for OpenAI/Anthropic when stream=true was sent
       const shouldStream = provider !== 'Google' && body.stream === true;
@@ -471,28 +474,14 @@ export const MCPClient = () => {
         if (done) break;
         buffer += value;
 
-        // Process every complete SSE event (blank line = event boundary)
+        // Process every complete SSE event (more forgiving boundary handling)
         try {
           while (true) {
-            // Prefer CRLFCRLF first (Windows/HTTP default), else LFLF
-            const crlf = buffer.indexOf('\r\n\r\n');
-            const lflf = buffer.indexOf('\n\n');
-
-            if (crlf === -1 && lflf === -1) break;
-
-            // Pick earliest boundary and its length
-            let boundaryIndex: number;
-            let boundaryLen: number;
-            if (crlf !== -1 && (lflf === -1 || crlf < lflf)) {
-              boundaryIndex = crlf;
-              boundaryLen = 4;       // \r\n\r\n
-            } else {
-              boundaryIndex = lflf;
-              boundaryLen = 2;       // \n\n
-            }
-
-            const raw = buffer.slice(0, boundaryIndex);
-            buffer = buffer.slice(boundaryIndex + boundaryLen);
+            const boundary = buffer.search(/\r?\n\r?\n/);
+            if (boundary === -1) break;
+            
+            const raw = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + (buffer[boundary] === '\r' ? 4 : 2));
 
             // Normalize and split lines
             const normalized = raw.replace(/\r/g, '');
@@ -508,6 +497,9 @@ export const MCPClient = () => {
               .map(l => l.slice('data:'.length).trimStart())
               .join('\n');
 
+            // Quick guard to ignore pings/heartbeats
+            if (dataPayload === ': ping' || dataPayload === ': keep-alive') continue;
+
             if (!dataPayload) continue;
 
             // OpenAI terminator
@@ -522,8 +514,28 @@ export const MCPClient = () => {
             
               /* ------------- OPENAI ------------- */
             if (provider === 'OpenAI') {
-              /* text tokens */
-              const deltaTxt = parsed.choices?.[0]?.delta?.content;
+              /* Robust text token handling for newer models */
+              const d = parsed.choices?.[0]?.delta ?? {};
+              let deltaTxt = '';
+
+              // 1) handle array-style streamed content parts
+              if (Array.isArray(d.content)) {
+                // parts may look like [{type:"text", text:"..."}]
+                deltaTxt = d.content
+                  .map((p: any) => (typeof p === 'string' ? p : (p?.text ?? '')))
+                  .join('');
+              } else if (typeof d.content === 'string') {
+                deltaTxt = d.content;
+              }
+
+              // (optional) some models stream tool text in reasoning_content
+              if (!deltaTxt && typeof d.reasoning_content === 'string') {
+                deltaTxt = d.reasoning_content;
+              }
+
+              // role deltas don't carry text; ignore safely
+              // if (!deltaTxt && d.role) { /* no-op */ }
+
               if (deltaTxt) {
                 fullText += deltaTxt;
                 
