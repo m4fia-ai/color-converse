@@ -25,7 +25,7 @@ export class MCPClientManager {
     const token =  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY3ZGNmYzkzNGI1ZmY3MTE1MDAzNWM4ZCIsImVtYWlsIjoiZ29rdWxAY2xpbWF0eS5haSIsInJvbGUiOiJjcmVhdG9yIiwiY291bnRyeUNvZGUiOiJPVEhFUiIsImlhdCI6MTc1NDUwNTMyMywiZXhwIjoxNzYyMjgxMzIzfQ.YnGfbnCMSAVrvY9CGykxALK6LT1B9wOGVUDrHQ-r6TM";
 
     try {
-      // Create the transport
+      // Create the transport with proper requestInit structure  
       this.transport = new StreamableHTTPClientTransport(
         new URL(url),
         {
