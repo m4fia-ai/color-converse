@@ -22,6 +22,8 @@ export class MCPClientManager {
   ): Promise<void> {
     console.log(`[MCP] Connecting using official SDK to: ${url}`);
 
+    const token =  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY3ZGNmYzkzNGI1ZmY3MTE1MDAzNWM4ZCIsImVtYWlsIjoiZ29rdWxAY2xpbWF0eS5haSIsInJvbGUiOiJjcmVhdG9yIiwiY291bnRyeUNvZGUiOiJPVEhFUiIsImlhdCI6MTc1NDUwNTMyMywiZXhwIjoxNzYyMjgxMzIzfQ.YnGfbnCMSAVrvY9CGykxALK6LT1B9wOGVUDrHQ-r6TM";
+
     try {
       // Create the transport
       this.transport = new StreamableHTTPClientTransport(
@@ -29,6 +31,8 @@ export class MCPClientManager {
         {
           requestInit: {
             // Add any additional headers if needed
+            Authorization: `Bearer ${token}`,
+
           }
         }
       );
