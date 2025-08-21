@@ -457,10 +457,32 @@ export const MCPClient = () => {
 
   /* ─────────────────── HANDLE STREAMING RESPONSE ──────────────────────── */
   const handleStreamingResponse = async (response: Response, provider: string) => {
-    const reader = response.body!
-      .pipeThrough(new TextDecoderStream())
-      .getReader();
+    const stream = response.body;
+    if (!stream) {
+      addLog('warning', 'Response has no body; falling back to JSON.');
+      const data = await response.json().catch(() => null);
+      if (!abortedRef.current && data) await handleLLMResponse(data);
+      return;
+    }
 
+    let stringReader: ReadableStreamDefaultReader<string> | null = null;
+    let uint8Reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    let decodeChunk: ((u8: Uint8Array) => string) | null = null;
+
+    if ('pipeThrough' in stream && typeof TextDecoderStream !== 'undefined') {
+      stringReader = (stream as ReadableStream)
+        .pipeThrough(new TextDecoderStream())
+        .getReader() as ReadableStreamDefaultReader<string>;
+    } else {
+      const td = new TextDecoder();
+      uint8Reader = stream.getReader();
+      decodeChunk = (u8: Uint8Array) => td.decode(u8, { stream: true });
+    }
+
+    const cancel = async () => {
+      try { await stringReader?.cancel(); } catch {}
+      try { await uint8Reader?.cancel(); } catch {}
+    };
     const streamingId = `stream-${crypto.randomUUID()}`;
     console.log('🌊 Will create streaming message when content arrives, id:', streamingId);
     
@@ -473,52 +495,45 @@ export const MCPClient = () => {
     try {
       while (true) {
         if (abortedRef.current) {
-          try { await reader.cancel(); } catch {}
+          try { await cancel(); } catch {}
           return;                          // 👈 leave immediately
         }
 
-        const { value, done } = await reader.read();
+        const { value, done } = stringReader ? await stringReader.read() : await uint8Reader!.read();
         if (done) break;
-        buffer += value;
+        buffer += typeof value === 'string' ? (value as string) : (decodeChunk ? decodeChunk(value as Uint8Array) : '');
 
         // Process every complete SSE event (more forgiving boundary handling)
         try {
           while (true) {
-            const boundary = buffer.search(/\r?\n\r?\n/);
-            if (boundary === -1) break;
-            
-            const raw = buffer.slice(0, boundary);
-            buffer = buffer.slice(boundary + (buffer[boundary] === '\r' ? 4 : 2));
+            const m = buffer.match(/\r?\n\r?\n/);
+            if (!m) break;
+            const idx = buffer.indexOf(m[0]);
+            const raw = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + m[0].length);
 
-            // Normalize and split lines
             const normalized = raw.replace(/\r/g, '');
             const lines = normalized.split('\n');
 
-            // Capture event name (may be undefined for OpenAI)
             const eventLine = lines.find(l => l.startsWith('event:'));
             const eventName = eventLine ? eventLine.slice('event:'.length).trim() : undefined;
 
-            // Join ALL data lines per SSE spec
             const dataPayload = lines
               .filter(l => l.startsWith('data:'))
               .map(l => l.slice('data:'.length).trimStart())
               .join('\n');
 
-            // Quick guard to ignore pings/heartbeats
-            if (dataPayload === ': ping' || dataPayload === ': keep-alive') continue;
+            if (!dataPayload || dataPayload === ': ping' || dataPayload === ': keep-alive') continue;
 
-            if (!dataPayload) continue;
-
-            // OpenAI terminator
             if (dataPayload === '[DONE]') {
-              try { await reader.cancel(); } catch {}
+              try { await cancel(); } catch {}
               throw new Error('__STREAM_END__');
             }
 
             let parsed: any;
             try {
               parsed = JSON.parse(dataPayload);
-            
+
               /* ------------- OPENAI ------------- */
             if (provider === 'OpenAI') {
               /* Robust text token handling for newer models */
@@ -626,7 +641,7 @@ export const MCPClient = () => {
                   }
                   
                   // ✅ End the current stream BEFORE running tools to avoid overlap
-                  try { await reader.cancel(); } catch {}
+              try { await cancel(); } catch {}
                   // Let executeToolCalls trigger the next LLM turn itself
                   await executeToolCalls(toolCalls);
                   return; // ⬅️ EXIT handler; next turn starts fresh
@@ -696,13 +711,13 @@ export const MCPClient = () => {
                   providerMessagesRef.current.push({ role: 'assistant', content: pendingAnthropicToolUses });
                   
                   // ✅ End the current stream BEFORE running tools to avoid overlap
-                  try { await reader.cancel(); } catch {}
+                  try { await cancel(); } catch {}
                   // Let executeToolCalls trigger the next LLM turn itself
                   await executeToolCalls(toolCalls);
                   return; // ⬅️ EXIT handler; next turn starts fresh
                 }
                 // mark end and break both loops
-                try { await reader.cancel(); } catch {}
+                try { await cancel(); } catch {}
                 throw new Error('__STREAM_END__');
               }
             }
