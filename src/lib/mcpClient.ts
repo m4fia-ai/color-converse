@@ -30,9 +30,9 @@ export class MCPClientManager {
         new URL(url),
         {
           requestInit: {
-            // Add any additional headers if needed
-            Authorization: `Bearer ${token}`,
-
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            }
           }
         }
       );
