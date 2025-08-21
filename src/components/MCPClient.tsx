@@ -391,15 +391,14 @@ export const MCPClient = () => {
 
       const resp = await fetch(selectedProvider.baseUrl, {
         method: 'POST',
-        headers: { 
+        mode: 'cors',              // explicit CORS
+        cache: 'no-store',         // avoid caches buffering SSE
+        headers: {
           'Content-Type': 'application/json',
-          ...(provider !== 'Google' ? { 
-            'Accept': 'text/event-stream',
-            'Accept-Encoding': 'identity'
-          } : {})
+          ...(provider !== 'Google' ? { 'Accept': 'text/event-stream' } : {}),
         },
         body: JSON.stringify(body),
-        signal: abortRef.current.signal,        // 👈 important
+        signal: abortRef.current.signal, // 👈 important
       });
 
       if (!resp.ok) {
@@ -420,6 +419,13 @@ export const MCPClient = () => {
       
       if (shouldStream) {
         addLog('info', 'Attempting to handle as streaming response');
+        // Feature guard: some browsers/responses don't expose a readable stream
+        if (!('body' in resp) || !resp.body || typeof (resp.body as any).pipeThrough !== 'function') {
+          addLog('warning', 'Stream not supported by browser/response; falling back to JSON.');
+          const data = await resp.json();
+          if (!abortedRef.current) await handleLLMResponse(data);
+          return;
+        }
         await handleStreamingResponse(resp, provider);   // ⇠ NEW ARG
         return;
       }
@@ -441,8 +447,9 @@ export const MCPClient = () => {
         addLog('info', 'Fetch aborted by user');
         return; // silent
       }
-      toast({ title: 'LLM Error', description: e.message ?? String(e), variant: 'destructive' });
-      addLog('error', e.message ?? String(e));
+      const hint = e?.cause?.message || e?.message || String(e);
+      toast({ title: 'Network error', description: hint, variant: 'destructive' });
+      addLog('error', `Fetch failed: ${hint}`);
     } finally {
       if (!abortedRef.current) setIsLoading(false);
     }
